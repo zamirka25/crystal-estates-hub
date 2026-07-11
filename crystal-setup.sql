@@ -1,0 +1,86 @@
+-- Crystal Estates Hub — shared database setup
+-- Paste this whole file into Supabase: SQL Editor -> New query -> Run
+
+create table if not exists ce_units (
+  id text primary key,
+  property text not null,
+  unit_no text not null,
+  type text default 'Room',
+  tenant text default '',
+  phone text default '',
+  monthly_rent text default '',
+  due_day int default 1,
+  status text default 'Occupied',
+  notes text default '',
+  updated_at timestamptz default now()
+);
+
+create table if not exists ce_rent_payments (
+  id text primary key,
+  unit_id text default '',
+  property text default '',
+  month_for text default '',
+  paid_date text default '',
+  amount text default '',
+  method text default '',
+  notes text default '',
+  updated_at timestamptz default now()
+);
+
+create table if not exists ce_carwash (
+  id text primary key,
+  date text default '',
+  wash_type text default 'Manual',
+  amount text default '',
+  notes text default '',
+  updated_at timestamptz default now()
+);
+
+create table if not exists ce_expenses (
+  id text primary key,
+  date text default '',
+  property text default 'General',
+  category text default 'Other',
+  description text default '',
+  amount text default '',
+  method text default '',
+  notes text default '',
+  updated_at timestamptz default now()
+);
+
+-- Security: only signed-in team members can read or write
+alter table ce_units enable row level security;
+alter table ce_rent_payments enable row level security;
+alter table ce_carwash enable row level security;
+alter table ce_expenses enable row level security;
+
+drop policy if exists "team can do everything" on ce_units;
+drop policy if exists "team can do everything" on ce_rent_payments;
+drop policy if exists "team can do everything" on ce_carwash;
+drop policy if exists "team can do everything" on ce_expenses;
+
+create policy "team can do everything" on ce_units for all to authenticated using (true) with check (true);
+create policy "team can do everything" on ce_rent_payments for all to authenticated using (true) with check (true);
+create policy "team can do everything" on ce_carwash for all to authenticated using (true) with check (true);
+create policy "team can do everything" on ce_expenses for all to authenticated using (true) with check (true);
+
+-- Live sync: broadcast changes to all connected devices
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table ce_units;
+  exception when duplicate_object then null;
+  end;
+  begin
+    alter publication supabase_realtime add table ce_rent_payments;
+  exception when duplicate_object then null;
+  end;
+  begin
+    alter publication supabase_realtime add table ce_carwash;
+  exception when duplicate_object then null;
+  end;
+  begin
+    alter publication supabase_realtime add table ce_expenses;
+  exception when duplicate_object then null;
+  end;
+end $$;
