@@ -117,6 +117,23 @@ td.num,th.num{text-align:right;}
 .login-card img{width:150px;max-width:60%;margin:0 auto 6px;border-radius:10px;}
 .login-card h2{color:var(--gold-dark);font-variant:small-caps;letter-spacing:1px;margin-bottom:2px;}
 
+/* Calendar */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+.cal-dow{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;text-align:center;padding:4px 0;}
+.cal-cell{background:var(--bg);border:1px solid var(--line);border-radius:8px;min-height:76px;padding:4px;font-size:11px;cursor:pointer;overflow:hidden;}
+.cal-cell:hover{border-color:var(--gold);}
+.cal-cell.blank{background:transparent;border:none;cursor:default;}
+.cal-cell.today{border:2px solid var(--gold);background:#fffdf6;}
+.cal-cell.selected{outline:2px solid var(--gold-dark);}
+.cal-daynum{font-weight:700;font-size:12px;margin-bottom:2px;color:var(--ink);}
+.cal-badge{display:block;border-radius:5px;padding:1px 4px;margin-bottom:2px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cal-badge.due{background:var(--orange-soft);color:var(--orange);}
+.cal-badge.overdue{background:var(--red-soft);color:var(--red);}
+.cal-badge.paid{background:var(--green-soft);color:var(--green);}
+.cal-badge.wash{background:var(--gold-soft);color:var(--gold-dark);}
+.cal-badge.spend{background:var(--silver-soft);color:var(--silver);}
+@media(max-width:700px){.cal-cell{min-height:56px;font-size:9.5px;}.cal-badge{padding:1px 2px;}}
+
 @media print{
   header,nav,.monthbar button,.no-print,#toast{display:none !important;}
   body{background:#fff;}
@@ -142,6 +159,7 @@ td.num,th.num{text-align:right;}
 <nav id="tabs">
   <button data-tab="dashboard" class="active" onclick="switchTab('dashboard')">Dashboard</button>
   <button data-tab="rent" onclick="switchTab('rent')">Rent</button>
+  <button data-tab="calendar" onclick="switchTab('calendar')">Calendar</button>
   <button data-tab="units" onclick="switchTab('units')">Units &amp; Tenants</button>
   <button data-tab="carwash" onclick="switchTab('carwash')">Car Wash</button>
   <button data-tab="expenses" onclick="switchTab('expenses')">Expenses</button>
@@ -174,6 +192,10 @@ td.num,th.num{text-align:right;}
         <h3>Crystal Gloss — this month</h3>
         <div id="dash-wash"></div>
       </div>
+      <div class="panel">
+        <h3>Company bills — <span id="dash-bills-month"></span></h3>
+        <div id="dash-bills"></div>
+      </div>
     </div>
   </div>
 </section>
@@ -197,6 +219,24 @@ td.num,th.num{text-align:right;}
     <thead><tr><th>Unit</th><th>Tenant</th><th class="num">Rent</th><th>Status</th><th class="no-print"></th></tr></thead>
     <tbody id="rent-body"></tbody>
   </table></div>
+</section>
+
+<!-- ============ CALENDAR ============ -->
+<section id="view-calendar" class="view">
+  <div class="monthbar">
+    <button onclick="shiftMonth('cal',-1)">‹</button>
+    <span class="mlabel" id="cal-mlabel"></span>
+    <button onclick="shiftMonth('cal',1)">›</button>
+    <button class="today-link" onclick="goThisMonth('cal')">this month</button>
+  </div>
+  <div class="panel">
+    <div class="cal-grid" id="cal-grid"></div>
+    <p class="muted" style="margin-top:10px;">Tap a day to see its details. 🟠 due · 🔴 overdue · 🟢 paid/received · gold = car wash takings.</p>
+  </div>
+  <div class="panel" id="cal-day-panel" style="display:none;">
+    <h3 id="cal-day-title"></h3>
+    <div id="cal-day-detail"></div>
+  </div>
 </section>
 
 <!-- ============ UNITS ============ -->
@@ -248,8 +288,20 @@ td.num,th.num{text-align:right;}
     <button class="today-link" onclick="goThisMonth('exp')">this month</button>
   </div>
   <div class="cards" id="exp-cards"></div>
+  <div class="panel">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <h3 style="margin-bottom:0;">Monthly bills</h3>
+      <span class="muted" id="bills-count" style="flex:1;"></span>
+      <button class="btn btn-primary btn-sm no-print" onclick="openBillModal()">+ Add bill</button>
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Bill</th><th>Property</th><th class="num">Due day</th><th class="num">Amount</th><th>Status</th><th class="no-print"></th></tr></thead>
+      <tbody id="bills-body"></tbody>
+    </table></div>
+    <p class="muted" style="margin-top:8px;">These bills repeat every month, all year round — they show as Due in each month (including future months) until marked paid.</p>
+  </div>
   <div class="panel no-print">
-    <h3>Add expense</h3>
+    <h3>Add one-off expense</h3>
     <form onsubmit="addExpense(event)">
       <div class="form-row">
         <div><label>Date</label><input type="date" id="exp-date" required></div>
@@ -381,6 +433,49 @@ td.num,th.num{text-align:right;}
   </div>
 </div>
 
+<!-- ============ BILL MODAL ============ -->
+<div id="bill-modal" class="modal">
+  <div class="modal-content">
+    <h2 id="bill-modal-title">Edit bill</h2>
+    <form onsubmit="saveBill(event)">
+      <div class="form-group"><label>Bill name</label><input type="text" id="b-name" required placeholder="e.g. Electricity — Awali"></div>
+      <div class="form-row">
+        <div><label>Property</label><select id="b-prop"><option>Awali</option><option>Iskan</option><option>Crystal Gloss</option><option>General</option></select></div>
+        <div><label>Category</label><select id="b-cat"><option>Gas</option><option>Electricity</option><option>Rent to owner</option><option>Water</option><option>Maintenance</option><option>Salaries</option><option>Other</option></select></div>
+      </div>
+      <div class="form-row">
+        <div><label>Usual amount</label><input type="number" id="b-amount" step="0.01" min="0" placeholder="0.00"></div>
+        <div><label>Due day of month</label><input type="number" id="b-dueday" min="1" max="28" value="1"></div>
+      </div>
+      <div class="form-group"><label>Notes</label><input type="text" id="b-notes"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-danger btn-sm" id="b-delete" onclick="deleteBill()" style="margin-right:auto;">Delete</button>
+        <button type="button" class="btn btn-ghost" onclick="closeModal('bill-modal')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============ BILL PAY MODAL ============ -->
+<div id="billpay-modal" class="modal">
+  <div class="modal-content">
+    <h2 id="billpay-title">Mark bill paid</h2>
+    <p id="billpay-sub" class="muted" style="margin-bottom:12px;"></p>
+    <form onsubmit="saveBillPayment(event)">
+      <div class="form-row">
+        <div><label>Amount paid</label><input type="number" id="bp-amount" step="0.01" min="0" required></div>
+        <div><label>Date paid</label><input type="date" id="bp-date" required></div>
+      </div>
+      <div class="form-group"><label>Notes</label><input type="text" id="bp-notes"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('billpay-modal')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- ============ SETUP NEEDED ============ -->
 <div id="setup-screen" class="modal">
   <div class="login-card">
@@ -412,11 +507,11 @@ td.num,th.num{text-align:right;}
 <script src="vendor/supabase.js"></script>
 <script>
 /* =================== State =================== */
-let units = [], rents = [], washes = [], expenses = [], settings = { currency: 'SAR' };
+let units = [], rents = [], washes = [], expenses = [], recurring = [], settings = { currency: 'SAR' };
 let months = {};                       // per-tab selected month, YYYY-MM
 let rentProp = 'All', unitProp = 'All';
-let editingUnitId = null, payingUnitId = null;
-const LS = { units:'cex-units', rents:'cex-rents', washes:'cex-washes', expenses:'cex-expenses', settings:'cex-settings' };
+let editingUnitId = null, payingUnitId = null, editingBillId = null, payingBillId = null, calSelectedDay = '';
+const LS = { units:'cex-units', rents:'cex-rents', washes:'cex-washes', expenses:'cex-expenses', recurring:'cex-recurring', settings:'cex-settings' };
 
 /* =================== Shared cloud database =================== */
 const SUPA_URL = 'https://dsvcfegwiqdbabywxnod.supabase.co';
@@ -430,25 +525,29 @@ const rentToRow = p => ({ id:p.id, unit_id:p.unitId||'', property:p.property||''
 const rowToRent = r => ({ id:r.id, unitId:r.unit_id||'', property:r.property||'', monthFor:r.month_for||'', paidDate:r.paid_date||'', amount:r.amount||'', method:r.method||'', notes:r.notes||'' });
 const washToRow = w => ({ id:w.id, date:w.date||'', wash_type:w.washType||'Manual', amount:w.amount==null?'':String(w.amount), notes:w.notes||'' });
 const rowToWash = r => ({ id:r.id, date:r.date||'', washType:r.wash_type||'Manual', amount:r.amount||'', notes:r.notes||'' });
-const expToRow = x => ({ id:x.id, date:x.date||'', property:x.property||'General', category:x.category||'Other', description:x.description||'', amount:x.amount==null?'':String(x.amount), method:x.method||'', notes:x.notes||'' });
-const rowToExp = r => ({ id:r.id, date:r.date||'', property:r.property||'General', category:r.category||'Other', description:r.description||'', amount:r.amount||'', method:r.method||'', notes:r.notes||'' });
-const TABLE_MAP = { ce_units:[unitToRow,rowToUnit], ce_rent_payments:[rentToRow,rowToRent], ce_carwash:[washToRow,rowToWash], ce_expenses:[expToRow,rowToExp] };
-const stateFor = t => t==='ce_units'?units : t==='ce_rent_payments'?rents : t==='ce_carwash'?washes : expenses;
-const setState = (t,a) => { if(t==='ce_units')units=a; else if(t==='ce_rent_payments')rents=a; else if(t==='ce_carwash')washes=a; else expenses=a; };
+const expToRow = x => ({ id:x.id, date:x.date||'', property:x.property||'General', category:x.category||'Other', description:x.description||'', amount:x.amount==null?'':String(x.amount), method:x.method||'', notes:x.notes||'', recurring_id:x.recurringId||'' });
+const rowToExp = r => ({ id:r.id, date:r.date||'', property:r.property||'General', category:r.category||'Other', description:r.description||'', amount:r.amount||'', method:r.method||'', notes:r.notes||'', recurringId:r.recurring_id||'' });
+const recToRow = b => ({ id:b.id, name:b.name, property:b.property||'General', category:b.category||'Other', amount:b.amount==null?'':String(b.amount), due_day:+b.dueDay||1, active:b.active!==false, notes:b.notes||'' });
+const rowToRec = r => ({ id:r.id, name:r.name, property:r.property||'General', category:r.category||'Other', amount:r.amount||'', dueDay:+r.due_day||1, active:r.active!==false, notes:r.notes||'' });
+const TABLE_MAP = { ce_units:[unitToRow,rowToUnit], ce_rent_payments:[rentToRow,rowToRent], ce_carwash:[washToRow,rowToWash], ce_expenses:[expToRow,rowToExp], ce_recurring:[recToRow,rowToRec] };
+const stateFor = t => t==='ce_units'?units : t==='ce_rent_payments'?rents : t==='ce_carwash'?washes : t==='ce_recurring'?recurring : expenses;
+const setState = (t,a) => { if(t==='ce_units')units=a; else if(t==='ce_rent_payments')rents=a; else if(t==='ce_carwash')washes=a; else if(t==='ce_recurring')recurring=a; else expenses=a; };
 
 function dbUpsert(table,obj){ db.from(table).upsert(TABLE_MAP[table][0](obj)).then(({error})=>{ if(error) toast('⚠ Sync failed: '+error.message); }); }
 function dbUpsertMany(table,objs){ if(!objs.length) return Promise.resolve(); return db.from(table).upsert(objs.map(TABLE_MAP[table][0])).then(({error})=>{ if(error) toast('⚠ Sync failed: '+error.message); }); }
 function dbDelete(table,id){ db.from(table).delete().eq('id',id).then(({error})=>{ if(error) toast('⚠ Sync failed: '+error.message); }); }
 
 async function fetchAll(){
-  const [u,r,w,x] = await Promise.all([
+  const [u,r,w,x,b] = await Promise.all([
     db.from('ce_units').select('*'), db.from('ce_rent_payments').select('*'),
-    db.from('ce_carwash').select('*'), db.from('ce_expenses').select('*')
+    db.from('ce_carwash').select('*'), db.from('ce_expenses').select('*'),
+    db.from('ce_recurring').select('*')
   ]);
-  const err = u.error||r.error||w.error||x.error;
+  const err = u.error||r.error||w.error||x.error||b.error;
   if (err) throw err;
   units = u.data.map(rowToUnit); rents = r.data.map(rowToRent);
   washes = w.data.map(rowToWash); expenses = x.data.map(rowToExp);
+  recurring = b.data.map(rowToRec);
   saveLocal();
 }
 
@@ -469,6 +568,7 @@ function subscribeRealtime(){
     .on('postgres_changes',{event:'*',schema:'public',table:'ce_rent_payments'},p=>applyChange('ce_rent_payments',p))
     .on('postgres_changes',{event:'*',schema:'public',table:'ce_carwash'},p=>applyChange('ce_carwash',p))
     .on('postgres_changes',{event:'*',schema:'public',table:'ce_expenses'},p=>applyChange('ce_expenses',p))
+    .on('postgres_changes',{event:'*',schema:'public',table:'ce_recurring'},p=>applyChange('ce_recurring',p))
     .subscribe();
 }
 
@@ -510,6 +610,7 @@ function saveLocal(){
   try{
     localStorage.setItem(LS.units,JSON.stringify(units)); localStorage.setItem(LS.rents,JSON.stringify(rents));
     localStorage.setItem(LS.washes,JSON.stringify(washes)); localStorage.setItem(LS.expenses,JSON.stringify(expenses));
+    localStorage.setItem(LS.recurring,JSON.stringify(recurring));
   }catch(e){}
 }
 function loadSettings(){ try{ settings = Object.assign({currency:'SAR'}, JSON.parse(localStorage.getItem(LS.settings)||'{}')); }catch(e){ settings={currency:'SAR'}; } }
@@ -523,12 +624,29 @@ function defaultUnits(){
   for (let i=1;i<=64;i++) list.push({ id:'IS'+String(i).padStart(2,'0'), property:'Iskan', unitNo:'Flat '+i, type:'Flat', tenant:'', phone:'', monthlyRent:'', dueDay:1, status:'Occupied', notes:'' });
   return list;
 }
+function defaultRecurring(){
+  const mk = (id,name,property,category) => ({ id, name, property, category, amount:'', dueDay:1, active:true, notes:'' });
+  return [
+    mk('RB01','Gas — Awali','Awali','Gas'),
+    mk('RB02','Electricity — Awali','Awali','Electricity'),
+    mk('RB03','Building rent to owner — Awali','Awali','Rent to owner'),
+    mk('RB04','Gas — Iskan','Iskan','Gas'),
+    mk('RB05','Electricity — Iskan','Iskan','Electricity'),
+    mk('RB06','Building rent to owner — Iskan','Iskan','Rent to owner'),
+    mk('RB07','Land rent to owner — Crystal Gloss','Crystal Gloss','Rent to owner')
+  ];
+}
 async function autoSeedIfEmpty(){
-  if (units.length) return;
-  units = defaultUnits();
-  await dbUpsertMany('ce_units', units);
+  if (!units.length){
+    units = defaultUnits();
+    await dbUpsertMany('ce_units', units);
+    toast('Set up Awali (18 rooms + shop) and Iskan (64 flats) for you');
+  }
+  if (!recurring.length){
+    recurring = defaultRecurring();
+    await dbUpsertMany('ce_recurring', recurring);
+  }
   saveLocal();
-  toast('Set up Awali (18 rooms + shop) and Iskan (64 flats) for you');
 }
 async function reseedUnits(){
   const have = new Set(units.map(u=>u.id));
@@ -581,6 +699,25 @@ function washStats(mk){
 }
 function expenseTotal(mk){ return expenses.filter(x=>String(x.date).slice(0,7)===mk).reduce((s,x)=>s+amt(x.amount),0); }
 
+/* =================== Recurring bills logic =================== */
+function billExpense(billId, mk){ return expenses.find(x=>x.recurringId===billId && String(x.date).slice(0,7)===mk); }
+function billStatus(b, mk){
+  if (billExpense(b.id,mk)) return 'paid';
+  const cm = currentMonthKey();
+  if (mk<cm) return 'overdue';
+  if (mk===cm){
+    const dd = mk+'-'+String(Math.min(+b.dueDay||1,28)).padStart(2,'0');
+    return todayISO()>dd ? 'overdue' : 'due';
+  }
+  return 'due';
+}
+function billsStats(mk){
+  const active = recurring.filter(b=>b.active!==false);
+  const paid = active.filter(b=>billStatus(b,mk)==='paid');
+  const dueAmt = active.filter(b=>billStatus(b,mk)!=='paid').reduce((s,b)=>s+amt(b.amount),0);
+  return { total:active.length, paid:paid.length, unpaid:active.length-paid.length, dueAmt };
+}
+
 /* =================== Tabs & months =================== */
 function switchTab(name){
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));
@@ -626,6 +763,14 @@ function renderDashboard(){
     <div class="unpaid-item"><span>Automatic</span><b>${money(ws.auto)}</b></div>
     <div class="unpaid-item"><span>Manual</span><b>${money(ws.man)}</b></div>
     <div class="unpaid-item"><span><b>Total</b></span><b style="color:var(--gold-dark);">${money(ws.total)}</b></div>`;
+
+  document.getElementById('dash-bills-month').textContent = monthLabelShort(mk);
+  const activeBills = recurring.filter(b=>b.active!==false);
+  document.getElementById('dash-bills').innerHTML = activeBills.length ? activeBills.map(b=>{
+    const s = billStatus(b,mk), ex2 = billExpense(b.id,mk);
+    return `<div class="unpaid-item"><span><b>${esc(b.name)}</b><br><span class="muted">${esc(b.property)} · due day ${esc(b.dueDay)}</span></span>
+      <span style="text-align:right;">${STATUS_CHIP[s]}<br><span class="muted">${ex2?money(amt(ex2.amount)):(amt(b.amount)>0?money(amt(b.amount)):'')}</span></span></div>`;
+  }).join('') : '<div class="empty">No monthly bills set up — add them in the Expenses tab.</div>';
 }
 
 /* =================== Rent view =================== */
@@ -790,9 +935,93 @@ function deleteWash(id){
 }
 
 /* =================== Expenses view =================== */
+function renderBills(){
+  const mk = months.exp;
+  const active = recurring.filter(b=>b.active!==false).sort((a,b)=>String(a.id).localeCompare(String(b.id),undefined,{numeric:true}));
+  const bs = billsStats(mk);
+  document.getElementById('bills-count').textContent = bs.total ? bs.paid+' of '+bs.total+' paid — '+monthLabel(mk) : '';
+  document.getElementById('bills-body').innerHTML = active.map(b=>{
+    const s = billStatus(b,mk), ex2 = billExpense(b.id,mk);
+    const action = s==='paid'
+      ? `<button class="btn btn-ghost btn-sm" onclick="undoBillPayment('${b.id}')" title="Remove this month's payment">↺ Undo</button>`
+      : `<button class="btn btn-primary btn-sm" onclick="openBillPayModal('${b.id}')">Mark paid</button>`;
+    return `<tr><td><b>${esc(b.name)}</b><br><span class="muted">${esc(b.category)}</span></td>
+      <td>${esc(b.property)}</td><td class="num">${esc(b.dueDay)}</td>
+      <td class="num">${s==='paid'&&ex2?money(amt(ex2.amount)):(amt(b.amount)>0?money(amt(b.amount)):'<span class="muted">—</span>')}</td>
+      <td>${STATUS_CHIP[s]}${s==='paid'&&ex2?'<br><span class="muted">'+fmtDate(ex2.date)+'</span>':''}</td>
+      <td class="no-print" style="text-align:right;white-space:nowrap;">${action}
+        <button class="btn btn-ghost btn-sm" onclick="openBillModal('${b.id}')" title="Edit bill">✎</button></td></tr>`;
+  }).join('') || '<tr><td colspan="6" class="empty">No monthly bills yet — tap “+ Add bill”.</td></tr>';
+}
+function openBillModal(id){
+  editingBillId = id || null;
+  document.getElementById('bill-modal-title').textContent = id ? 'Edit bill' : 'Add monthly bill';
+  document.getElementById('b-delete').style.display = id ? '' : 'none';
+  const b = id ? recurring.find(x=>x.id===id) : { name:'', property:'Awali', category:'Gas', amount:'', dueDay:1, notes:'' };
+  if (!b) return;
+  document.getElementById('b-name').value = b.name;
+  document.getElementById('b-prop').value = b.property;
+  document.getElementById('b-cat').value = b.category;
+  document.getElementById('b-amount').value = b.amount;
+  document.getElementById('b-dueday').value = b.dueDay||1;
+  document.getElementById('b-notes').value = b.notes;
+  document.getElementById('bill-modal').classList.add('show');
+}
+function saveBill(e){
+  e.preventDefault();
+  let b = editingBillId ? recurring.find(x=>x.id===editingBillId) : null;
+  if (!b){ b = { id:nextId('RB',recurring,2), active:true }; recurring.push(b); }
+  b.name = document.getElementById('b-name').value.trim();
+  b.property = document.getElementById('b-prop').value;
+  b.category = document.getElementById('b-cat').value;
+  b.amount = document.getElementById('b-amount').value;
+  b.dueDay = +document.getElementById('b-dueday').value||1;
+  b.notes = document.getElementById('b-notes').value.trim();
+  dbUpsert('ce_recurring',b); saveLocal();
+  closeModal('bill-modal'); refreshAll();
+  toast('Bill saved — it will appear every month');
+}
+function deleteBill(){
+  if (!editingBillId) return;
+  const b = recurring.find(x=>x.id===editingBillId);
+  if (!confirm('Delete the monthly bill "'+b.name+'"? Past payments stay in the expense list.')) return;
+  recurring = recurring.filter(x=>x.id!==editingBillId); dbDelete('ce_recurring',editingBillId); saveLocal();
+  closeModal('bill-modal'); refreshAll();
+  toast('Bill deleted');
+}
+function openBillPayModal(id){
+  const b = recurring.find(x=>x.id===id); if(!b) return;
+  payingBillId = id;
+  document.getElementById('billpay-title').textContent = 'Mark paid — '+b.name;
+  document.getElementById('billpay-sub').textContent = b.property+' · '+monthLabel(months.exp);
+  document.getElementById('bp-amount').value = b.amount || '';
+  const mk = months.exp, cm = currentMonthKey();
+  document.getElementById('bp-date').value = mk===cm ? todayISO() : mk+'-'+String(Math.min(+b.dueDay||1,28)).padStart(2,'0');
+  document.getElementById('bp-notes').value = '';
+  document.getElementById('billpay-modal').classList.add('show');
+}
+function saveBillPayment(e){
+  e.preventDefault();
+  const b = recurring.find(x=>x.id===payingBillId); if(!b) return;
+  const x = { id:nextId('E',expenses,5), date:document.getElementById('bp-date').value,
+    property:b.property, category:b.category, description:b.name,
+    amount:document.getElementById('bp-amount').value, method:'', notes:document.getElementById('bp-notes').value.trim(),
+    recurringId:b.id };
+  expenses.push(x); dbUpsert('ce_expenses',x); saveLocal();
+  closeModal('billpay-modal'); refreshAll();
+  toast(b.name+' marked paid — '+money(amt(x.amount)));
+}
+function undoBillPayment(id){
+  const mk = months.exp;
+  const ex2 = billExpense(id,mk); if(!ex2) return;
+  if (!confirm('Remove the payment of '+money(amt(ex2.amount))+' for "'+(ex2.description||'this bill')+'"?')) return;
+  expenses = expenses.filter(x=>x.id!==ex2.id); dbDelete('ce_expenses',ex2.id); saveLocal(); refreshAll();
+  toast('Payment removed — bill shows as due again');
+}
 function renderExpenses(){
   const mk = months.exp;
   document.getElementById('exp-mlabel').textContent = monthLabel(mk);
+  renderBills();
   const list = expenses.filter(x=>String(x.date).slice(0,7)===mk).sort((a,b)=>b.date.localeCompare(a.date)||String(b.id).localeCompare(String(a.id)));
   const total = list.reduce((s,x)=>s+amt(x.amount),0);
   const byProp = {};
@@ -821,6 +1050,72 @@ function deleteExpense(id){
   const x = expenses.find(e=>e.id===id); if(!x) return;
   if (!confirm('Delete expense "'+(x.description||x.category)+'" of '+money(amt(x.amount))+'?')) return;
   expenses = expenses.filter(e=>e.id!==id); dbDelete('ce_expenses',id); saveLocal(); refreshAll();
+}
+
+/* =================== Calendar =================== */
+function renderCalendar(){
+  const mk = months.cal;
+  document.getElementById('cal-mlabel').textContent = monthLabel(mk);
+  const [y,m] = mk.split('-').map(Number);
+  const startDow = (new Date(y,m-1,1).getDay()+6)%7;        // Monday = 0
+  const daysInMonth = new Date(y,m,0).getDate();
+  const today = todayISO();
+  let html = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<div class="cal-dow">${d}</div>`).join('');
+  for (let i=0;i<startDow;i++) html += '<div class="cal-cell blank"></div>';
+  for (let d=1;d<=daysInMonth;d++){
+    const dateStr = mk+'-'+String(d).padStart(2,'0');
+    let badges = '';
+    // rent due on this day
+    const dueUnits = units.filter(u=>u.status!=='Vacant' && amt(u.monthlyRent)>0 && Math.min(+u.dueDay||1,28)===d);
+    if (dueUnits.length){
+      const unpaid = dueUnits.filter(u=>paidAmount(u.id,mk)<amt(u.monthlyRent)).length;
+      const cls = unpaid===0 ? 'paid' : (dateStr<today ? 'overdue' : 'due');
+      badges += `<span class="cal-badge ${cls}">🏠 ${dueUnits.length} rent${unpaid===0?' ✓':' due'}</span>`;
+    }
+    // recurring bills due on this day
+    recurring.filter(b=>b.active!==false && Math.min(+b.dueDay||1,28)===d).forEach(b=>{
+      const s = billStatus(b,mk);
+      badges += `<span class="cal-badge ${s==='paid'?'paid':(s==='overdue'?'overdue':'due')}">${esc(b.name)}${s==='paid'?' ✓':''}</span>`;
+    });
+    // money received that day
+    const recv = rents.filter(p=>p.paidDate===dateStr).reduce((s,p)=>s+amt(p.amount),0);
+    if (recv>0) badges += `<span class="cal-badge paid">+ ${money0(recv)}</span>`;
+    const wsh = washes.filter(w=>w.date===dateStr).reduce((s,w)=>s+amt(w.amount),0);
+    if (wsh>0) badges += `<span class="cal-badge wash">🚿 ${money0(wsh)}</span>`;
+    const spent = expenses.filter(x=>x.date===dateStr).reduce((s,x)=>s+amt(x.amount),0);
+    if (spent>0) badges += `<span class="cal-badge spend">− ${money0(spent)}</span>`;
+    const cls = (dateStr===today?' today':'')+(dateStr===calSelectedDay?' selected':'');
+    html += `<div class="cal-cell${cls}" onclick="showCalDay('${dateStr}')"><div class="cal-daynum">${d}</div>${badges}</div>`;
+  }
+  document.getElementById('cal-grid').innerHTML = html;
+  if (calSelectedDay && calSelectedDay.slice(0,7)===mk) renderCalDayDetail(calSelectedDay);
+  else document.getElementById('cal-day-panel').style.display = 'none';
+}
+function showCalDay(dateStr){ calSelectedDay = dateStr; renderCalendar(); renderCalDayDetail(dateStr); }
+function renderCalDayDetail(dateStr){
+  const mk = dateStr.slice(0,7), d = +dateStr.slice(8,10);
+  const rows = [];
+  units.filter(u=>u.status!=='Vacant' && amt(u.monthlyRent)>0 && Math.min(+u.dueDay||1,28)===d).forEach(u=>{
+    const s = unitRentStatus(u,mk);
+    rows.push(`<div class="unpaid-item"><span>🏠 Rent due — <b>${esc(u.property)} · ${esc(u.unitNo)}</b> <span class="muted">${esc(u.tenant)}</span></span><span>${STATUS_CHIP[s]} <b>${money(amt(u.monthlyRent))}</b></span></div>`);
+  });
+  recurring.filter(b=>b.active!==false && Math.min(+b.dueDay||1,28)===d).forEach(b=>{
+    const s = billStatus(b,mk), ex2 = billExpense(b.id,mk);
+    rows.push(`<div class="unpaid-item"><span>📄 Bill — <b>${esc(b.name)}</b></span><span>${STATUS_CHIP[s]} <b>${ex2?money(amt(ex2.amount)):(amt(b.amount)>0?money(amt(b.amount)):'')}</b></span></div>`);
+  });
+  rents.filter(p=>p.paidDate===dateStr).forEach(p=>{
+    const u = units.find(x=>x.id===p.unitId)||{};
+    rows.push(`<div class="unpaid-item"><span>✅ Rent received — <b>${esc(u.unitNo)||p.unitId}</b> <span class="muted">(${esc(p.monthFor)})</span></span><b style="color:var(--green);">${money(amt(p.amount))}</b></div>`);
+  });
+  washes.filter(w=>w.date===dateStr).forEach(w=>{
+    rows.push(`<div class="unpaid-item"><span>🚿 Crystal Gloss — ${esc(w.washType)} <span class="muted">${esc(w.notes)}</span></span><b style="color:var(--gold-dark);">${money(amt(w.amount))}</b></div>`);
+  });
+  expenses.filter(x=>x.date===dateStr).forEach(x=>{
+    rows.push(`<div class="unpaid-item"><span>💸 ${esc(x.description)||esc(x.category)} <span class="muted">${esc(x.property)}</span></span><b style="color:var(--red);">− ${money(amt(x.amount))}</b></div>`);
+  });
+  document.getElementById('cal-day-title').textContent = new Date(dateStr+'T00:00:00').toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  document.getElementById('cal-day-detail').innerHTML = rows.join('') || '<div class="empty">Nothing on this day.</div>';
+  document.getElementById('cal-day-panel').style.display = '';
 }
 
 /* =================== Reports =================== */
@@ -879,6 +1174,7 @@ function renderReports(){
       </div>
       <div class="panel">
         <h3>Expenses by category</h3>
+        <p class="muted" style="margin-bottom:8px;">Monthly bills: ${billsStats(mk).paid} of ${billsStats(mk).total} paid</p>
         <table><tbody>${catRows}</tbody></table>
         <h3 style="margin-top:16px;">Unpaid units (${unpaid.length})</h3>
         ${unpaid.length?`<table><tbody>${unpaid.map(u=>`<tr><td>${esc(u.property)} · ${esc(u.unitNo)}<br><span class="muted">${esc(u.tenant)}</span></td><td class="num">${money(Math.max(0,amt(u.monthlyRent)-paidAmount(u.id,mk)))}</td></tr>`).join('')}</tbody></table>`:'<p class="empty">All paid 🎉</p>'}
@@ -938,7 +1234,7 @@ function enableNotifications(){
 }
 function exportBackup(){
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify({app:'crystal-estates-hub',exported:new Date().toISOString(),units,rents,washes,expenses},null,2)],{type:'application/json'}));
+  a.href = URL.createObjectURL(new Blob([JSON.stringify({app:'crystal-estates-hub',exported:new Date().toISOString(),units,rents,washes,expenses,recurring},null,2)],{type:'application/json'}));
   a.download = 'crystal-estates-backup-'+todayISO()+'.json'; a.click();
   toast('Backup downloaded');
 }
@@ -950,9 +1246,10 @@ function importBackup(e){
       const d = JSON.parse(reader.result);
       if (!d.units || !Array.isArray(d.units)) throw new Error('Not a Crystal Estates backup file');
       if (!confirm('Restore backup from '+(d.exported||'unknown date')+'? This adds/updates '+d.units.length+' units, '+(d.rents||[]).length+' payments, '+(d.washes||[]).length+' car wash entries and '+(d.expenses||[]).length+' expenses for the whole team.')) return;
-      units=d.units; rents=d.rents||[]; washes=d.washes||[]; expenses=d.expenses||[];
+      units=d.units; rents=d.rents||[]; washes=d.washes||[]; expenses=d.expenses||[]; recurring=d.recurring||recurring;
       await dbUpsertMany('ce_units',units); await dbUpsertMany('ce_rent_payments',rents);
       await dbUpsertMany('ce_carwash',washes); await dbUpsertMany('ce_expenses',expenses);
+      await dbUpsertMany('ce_recurring',recurring);
       saveLocal(); refreshAll(); toast('Backup restored ✓');
     }catch(err){ toast('⚠ '+err.message); }
   };
@@ -963,8 +1260,12 @@ function importBackup(e){
 function remindersOnOpen(){
   const mk = currentMonthKey();
   const overdue = units.filter(u=>unitRentStatus(u,mk)==='overdue');
-  if (!overdue.length) return;
-  const msg = overdue.length+' unit(s) overdue on rent this month';
+  const overdueBills = recurring.filter(b=>b.active!==false && billStatus(b,mk)==='overdue');
+  if (!overdue.length && !overdueBills.length) return;
+  const parts = [];
+  if (overdue.length) parts.push(overdue.length+' unit(s) overdue on rent');
+  if (overdueBills.length) parts.push(overdueBills.length+' bill(s) to pay');
+  const msg = parts.join(' · ')+' this month';
   toast('🔔 '+msg);
   if ('Notification' in window && Notification.permission==='granted'){
     try{ new Notification('Crystal Estates', { body:msg, icon:'icons/icon-192.png' }); }catch(e){}
@@ -974,7 +1275,7 @@ function remindersOnOpen(){
 /* =================== Boot =================== */
 function closeModal(id){ document.getElementById(id).classList.remove('show'); }
 function refreshAll(){
-  renderDashboard(); renderRent(); renderUnits(); renderWash(); renderExpenses(); renderReports();
+  renderDashboard(); renderRent(); renderUnits(); renderWash(); renderExpenses(); renderReports(); renderCalendar();
 }
 async function startApp(){
   document.getElementById('login-screen').classList.remove('show');
@@ -997,7 +1298,7 @@ async function startApp(){
 (async function init(){
   loadSettings();
   const mk = currentMonthKey();
-  months = { dash:mk, rent:mk, wash:mk, exp:mk, rep:mk };
+  months = { dash:mk, rent:mk, wash:mk, exp:mk, rep:mk, cal:mk };
   document.getElementById('set-currency').value = settings.currency;
   const { data } = await db.auth.getSession();
   if (data && data.session) startApp();

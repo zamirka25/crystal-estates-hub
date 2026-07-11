@@ -1,4 +1,4 @@
-const CACHE = 'ce-hub-v1';
+const CACHE = 'ce-hub-v2';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './vendor/supabase.js', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', e => {

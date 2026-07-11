@@ -12,6 +12,8 @@ Rent, car wash and expense manager for Crystal Estates — installable web app (
 ## Features
 - Month-by-month rent board for every unit: Paid / Partial / Due / Overdue / Vacant
 - One-tap "Record payment" pre-filled with the unit's rent
+- Calendar view for any month of the year: rent due days, bills due, money in/out per day
+- Recurring monthly bills (gas, electricity, rent to owner) that appear in every month all year round until marked paid
 - Units & tenants register (tenant, phone, rent, due day, occupancy, notes)
 - Daily car wash takings with automatic vs manual split
 - Expense tracking by property and category

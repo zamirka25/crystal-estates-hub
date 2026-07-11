@@ -45,24 +45,42 @@ create table if not exists ce_expenses (
   amount text default '',
   method text default '',
   notes text default '',
+  recurring_id text default '',
   updated_at timestamptz default now()
 );
+
+create table if not exists ce_recurring (
+  id text primary key,
+  name text not null,
+  property text default 'General',
+  category text default 'Other',
+  amount text default '',
+  due_day int default 1,
+  active boolean default true,
+  notes text default '',
+  updated_at timestamptz default now()
+);
+
+alter table ce_expenses add column if not exists recurring_id text default '';
 
 -- Security: only signed-in team members can read or write
 alter table ce_units enable row level security;
 alter table ce_rent_payments enable row level security;
 alter table ce_carwash enable row level security;
 alter table ce_expenses enable row level security;
+alter table ce_recurring enable row level security;
 
 drop policy if exists "team can do everything" on ce_units;
 drop policy if exists "team can do everything" on ce_rent_payments;
 drop policy if exists "team can do everything" on ce_carwash;
 drop policy if exists "team can do everything" on ce_expenses;
+drop policy if exists "team can do everything" on ce_recurring;
 
 create policy "team can do everything" on ce_units for all to authenticated using (true) with check (true);
 create policy "team can do everything" on ce_rent_payments for all to authenticated using (true) with check (true);
 create policy "team can do everything" on ce_carwash for all to authenticated using (true) with check (true);
 create policy "team can do everything" on ce_expenses for all to authenticated using (true) with check (true);
+create policy "team can do everything" on ce_recurring for all to authenticated using (true) with check (true);
 
 -- Live sync: broadcast changes to all connected devices
 do $$
@@ -81,6 +99,10 @@ begin
   end;
   begin
     alter publication supabase_realtime add table ce_expenses;
+  exception when duplicate_object then null;
+  end;
+  begin
+    alter publication supabase_realtime add table ce_recurring;
   exception when duplicate_object then null;
   end;
 end $$;
