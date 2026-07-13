@@ -1132,9 +1132,18 @@ async function uploadInvoice(file, unitId, mk){
 }
 async function viewInvoice(id){
   const v = findInv(id); if (!v) return;
+  // Open the tab synchronously (within the tap) so mobile popup-blockers don't stop it, then point it
+  // at the secure link once ready. opener nulled so the opened file tab stays isolated from the app.
+  let w = window.open('', '_blank');
+  if (w) { try { w.opener = null; } catch(e){} try { w.document.write('Opening invoice…'); } catch(e){} }
   const { data, error } = await db.storage.from('invoices').createSignedUrl(v.filePath, 3600);
-  if (error){ toast('⚠ Could not open — the file may have been removed'); return; }
-  window.open(data.signedUrl, '_blank', 'noopener');
+  if (error || !data || !data.signedUrl){
+    if (w) w.close();
+    toast('⚠ Could not open — the file may have been removed');
+    return;
+  }
+  if (w) w.location.href = data.signedUrl;
+  else window.open(data.signedUrl, '_blank', 'noopener');   // fallback if the pre-open was blocked
 }
 async function removeInvoice(id){
   const v = findInv(id); if (!v) return;
