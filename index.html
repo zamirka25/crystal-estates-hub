@@ -480,6 +480,24 @@ td.num,th.num{text-align:right;}
   </div>
 </div>
 
+<!-- ============ INVOICE MODAL ============ -->
+<div id="inv-modal" class="modal">
+  <div class="modal-content">
+    <h2 id="inv-title">Invoices</h2>
+    <p id="inv-sub" class="muted" style="margin-bottom:12px;"></p>
+    <div id="inv-list"></div>
+    <div class="form-group" style="margin-top:14px;">
+      <label>Upload invoice (PDF or photo)</label>
+      <input type="file" id="inv-file" accept="application/pdf,image/*" capture="environment" onchange="onInvoiceFile()">
+      <p id="inv-status" class="muted" style="margin-top:6px;min-height:18px;"></p>
+      <p class="muted" style="font-size:12px;">Tip: on your phone you can take a photo of a paper invoice, or pick a PDF. Files are kept private — only signed-in team members can open them.</p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-primary" onclick="closeModal('inv-modal')">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ SETUP NEEDED ============ -->
 <div id="setup-screen" class="modal">
   <div class="login-card">
@@ -511,11 +529,12 @@ td.num,th.num{text-align:right;}
 <script src="vendor/supabase.js"></script>
 <script>
 /* =================== State =================== */
-let units = [], rents = [], washes = [], expenses = [], recurring = [], settings = { currency: 'SAR' };
+let units = [], rents = [], washes = [], expenses = [], recurring = [], invoices = [], settings = { currency: 'SAR' };
+let invUnitId = null, invMonth = null;
 let months = {};                       // per-tab selected month, YYYY-MM
 let rentProp = 'All', unitProp = 'All';
 let editingUnitId = null, payingUnitId = null, editingBillId = null, payingBillId = null, calSelectedDay = '', newUnitDraftId = null;
-const LS = { units:'cex-units', rents:'cex-rents', washes:'cex-washes', expenses:'cex-expenses', recurring:'cex-recurring', settings:'cex-settings' };
+const LS = { units:'cex-units', rents:'cex-rents', washes:'cex-washes', expenses:'cex-expenses', recurring:'cex-recurring', invoices:'cex-invoices', settings:'cex-settings' };
 
 /* =================== Shared cloud database =================== */
 const SUPA_URL = 'https://dsvcfegwiqdbabywxnod.supabase.co';
@@ -533,25 +552,27 @@ const expToRow = x => ({ id:x.id, date:x.date||'', property:x.property||'General
 const rowToExp = r => ({ id:r.id, date:r.date||'', property:r.property||'General', category:r.category||'Other', description:r.description||'', amount:r.amount||'', method:r.method||'', notes:r.notes||'', recurringId:r.recurring_id||'' });
 const recToRow = b => ({ id:b.id, name:b.name, property:b.property||'General', category:b.category||'Other', amount:b.amount==null?'':String(b.amount), due_day:+b.dueDay||1, active:b.active!==false, notes:b.notes||'' });
 const rowToRec = r => ({ id:r.id, name:r.name, property:r.property||'General', category:r.category||'Other', amount:r.amount||'', dueDay:+r.due_day||1, active:r.active!==false, notes:r.notes||'' });
-const TABLE_MAP = { ce_units:[unitToRow,rowToUnit], ce_rent_payments:[rentToRow,rowToRent], ce_carwash:[washToRow,rowToWash], ce_expenses:[expToRow,rowToExp], ce_recurring:[recToRow,rowToRec] };
-const stateFor = t => t==='ce_units'?units : t==='ce_rent_payments'?rents : t==='ce_carwash'?washes : t==='ce_recurring'?recurring : expenses;
-const setState = (t,a) => { if(t==='ce_units')units=a; else if(t==='ce_rent_payments')rents=a; else if(t==='ce_carwash')washes=a; else if(t==='ce_recurring')recurring=a; else expenses=a; };
+const invToRow = v => ({ id:v.id, unit_id:v.unitId||'', month_for:v.monthFor||'', file_path:v.filePath||'', file_name:v.fileName||'', notes:v.notes||'' });
+const rowToInv = r => ({ id:r.id, unitId:r.unit_id||'', monthFor:r.month_for||'', filePath:r.file_path||'', fileName:r.file_name||'', notes:r.notes||'' });
+const TABLE_MAP = { ce_units:[unitToRow,rowToUnit], ce_rent_payments:[rentToRow,rowToRent], ce_carwash:[washToRow,rowToWash], ce_expenses:[expToRow,rowToExp], ce_recurring:[recToRow,rowToRec], ce_invoices:[invToRow,rowToInv] };
+const stateFor = t => t==='ce_units'?units : t==='ce_rent_payments'?rents : t==='ce_carwash'?washes : t==='ce_recurring'?recurring : t==='ce_invoices'?invoices : expenses;
+const setState = (t,a) => { if(t==='ce_units')units=a; else if(t==='ce_rent_payments')rents=a; else if(t==='ce_carwash')washes=a; else if(t==='ce_recurring')recurring=a; else if(t==='ce_invoices')invoices=a; else expenses=a; };
 
 function dbUpsert(table,obj){ return db.from(table).upsert(TABLE_MAP[table][0](obj)).then(({error})=>{ if(error) toast('⚠ Sync failed: '+error.message); return { error }; }); }
 function dbUpsertMany(table,objs){ if(!objs.length) return Promise.resolve(); return db.from(table).upsert(objs.map(TABLE_MAP[table][0])).then(({error})=>{ if(error) toast('⚠ Sync failed: '+error.message); }); }
 function dbDelete(table,id){ db.from(table).delete().eq('id',id).then(({error})=>{ if(error) toast('⚠ Sync failed: '+error.message); }); }
 
 async function fetchAll(){
-  const [u,r,w,x,b] = await Promise.all([
+  const [u,r,w,x,b,iv] = await Promise.all([
     db.from('ce_units').select('*'), db.from('ce_rent_payments').select('*'),
     db.from('ce_carwash').select('*'), db.from('ce_expenses').select('*'),
-    db.from('ce_recurring').select('*')
+    db.from('ce_recurring').select('*'), db.from('ce_invoices').select('*')
   ]);
-  const err = u.error||r.error||w.error||x.error||b.error;
+  const err = u.error||r.error||w.error||x.error||b.error||iv.error;
   if (err) throw err;
   units = u.data.map(rowToUnit); rents = r.data.map(rowToRent);
   washes = w.data.map(rowToWash); expenses = x.data.map(rowToExp);
-  recurring = b.data.map(rowToRec);
+  recurring = b.data.map(rowToRec); invoices = iv.data.map(rowToInv);
   saveLocal();
 }
 
@@ -573,6 +594,7 @@ function subscribeRealtime(){
     .on('postgres_changes',{event:'*',schema:'public',table:'ce_carwash'},p=>applyChange('ce_carwash',p))
     .on('postgres_changes',{event:'*',schema:'public',table:'ce_expenses'},p=>applyChange('ce_expenses',p))
     .on('postgres_changes',{event:'*',schema:'public',table:'ce_recurring'},p=>applyChange('ce_recurring',p))
+    .on('postgres_changes',{event:'*',schema:'public',table:'ce_invoices'},p=>applyChange('ce_invoices',p))
     .subscribe();
 }
 
@@ -615,6 +637,7 @@ function saveLocal(){
     localStorage.setItem(LS.units,JSON.stringify(units)); localStorage.setItem(LS.rents,JSON.stringify(rents));
     localStorage.setItem(LS.washes,JSON.stringify(washes)); localStorage.setItem(LS.expenses,JSON.stringify(expenses));
     localStorage.setItem(LS.recurring,JSON.stringify(recurring));
+    localStorage.setItem(LS.invoices,JSON.stringify(invoices));
   }catch(e){}
 }
 function loadSettings(){ try{ settings = Object.assign({currency:'SAR'}, JSON.parse(localStorage.getItem(LS.settings)||'{}')); }catch(e){ settings={currency:'SAR'}; } }
@@ -799,11 +822,13 @@ function renderRent(){
       else action = `<button class="btn btn-primary btn-sm" onclick="openPayModal('${u.id}')">Record</button>`;
     }
     const paidNote = pays.length ? `<br><span class="muted">${money(paid)} on ${fmtDate(pays[pays.length-1].paidDate)}</span>` : '';
+    const invN = invoicesFor(u.id, mk).length;
+    const invBtn = `<button class="btn ${invN?'btn-primary':'btn-ghost'} btn-sm" onclick="openInvoiceModal('${u.id}')" title="Rent invoice for this month">📎${invN?' '+invN:''}</button>`;
     return `<tr><td><b>${esc(u.property)}</b> · ${esc(u.unitNo)}</td>
       <td>${esc(u.tenant)||'<span class="muted">— add tenant —</span>'}</td>
       <td class="num">${amt(u.monthlyRent)>0?money(amt(u.monthlyRent)):'<span class="muted">not set</span>'}</td>
       <td>${STATUS_CHIP[s]}${paidNote}</td>
-      <td class="no-print" style="text-align:right;white-space:nowrap;">${action} <button class="btn btn-ghost btn-sm" onclick="openUnitModal('${u.id}')" title="Edit tenant, rent, date or status">✎ Edit</button></td></tr>`;
+      <td class="no-print" style="text-align:right;white-space:nowrap;">${action} ${invBtn} <button class="btn btn-ghost btn-sm" onclick="openUnitModal('${u.id}')" title="Edit tenant, rent, date or status">✎ Edit</button></td></tr>`;
   }).join('') || '<tr><td colspan="5" class="empty">No units match.</td></tr>';
 }
 
@@ -1088,6 +1113,68 @@ function deleteExpense(id){
   expenses = expenses.filter(e=>e.id!==id); dbDelete('ce_expenses',id); saveLocal(); refreshAll();
 }
 
+/* =================== Rent invoices (files in Supabase Storage) =================== */
+function invoicesFor(unitId, mk){ return invoices.filter(v=>v.unitId===unitId && v.monthFor===mk); }
+function findInv(id){ return invoices.find(v=>v.id===id); }
+async function uploadInvoice(file, unitId, mk){
+  const safe = (file.name||'invoice').replace(/[^\w.\- ]+/g,'_').slice(-90);
+  const path = unitId+'/'+mk+'/'+Date.now()+'_'+safe;
+  const up = await db.storage.from('invoices').upload(path, file, { upsert:false, contentType:file.type||undefined });
+  if (up.error) return { error: up.error };
+  const inv = { id:'INV'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), unitId, monthFor:mk, filePath:path, fileName:file.name||safe, notes:'' };
+  const { error } = await dbUpsert('ce_invoices', inv);
+  if (error){ db.storage.from('invoices').remove([path]); return { error }; }   // don't leave an orphan file
+  const i = invoices.findIndex(v=>v.id===inv.id); if (i>=0) invoices[i]=inv; else invoices.push(inv);
+  saveLocal();
+  return { inv };
+}
+async function viewInvoice(id){
+  const v = findInv(id); if (!v) return;
+  const { data, error } = await db.storage.from('invoices').createSignedUrl(v.filePath, 3600);
+  if (error){ toast('⚠ Could not open: '+error.message); return; }
+  window.open(data.signedUrl, '_blank');
+}
+async function removeInvoice(id){
+  const v = findInv(id); if (!v) return;
+  if (!confirm('Remove the invoice "'+v.fileName+'"? This deletes the file for the whole team.')) return;
+  await db.storage.from('invoices').remove([v.filePath]);
+  invoices = invoices.filter(x=>x.id!==id); dbDelete('ce_invoices', id); saveLocal();
+  renderInvoiceModal(); refreshAll();
+  toast('Invoice removed');
+}
+function openInvoiceModal(unitId){
+  const u = units.find(x=>x.id===unitId); if (!u) return;
+  invUnitId = unitId; invMonth = months.rent;
+  document.getElementById('inv-title').textContent = 'Invoices — '+u.property+' · '+u.unitNo;
+  document.getElementById('inv-sub').textContent = (u.tenant?u.tenant+' — ':'')+monthLabel(invMonth);
+  document.getElementById('inv-file').value = '';
+  document.getElementById('inv-status').textContent = '';
+  renderInvoiceModal();
+  document.getElementById('inv-modal').classList.add('show');
+}
+function renderInvoiceModal(){
+  const list = invoicesFor(invUnitId, invMonth);
+  document.getElementById('inv-list').innerHTML = list.length ? list.map(v=>`
+    <div class="unpaid-item"><span>📄 ${esc(v.fileName)}</span>
+      <span style="white-space:nowrap;">
+        <button class="btn btn-primary btn-sm" onclick="viewInvoice('${v.id}')">View</button>
+        <button class="btn btn-ghost btn-sm" onclick="removeInvoice('${v.id}')" title="Remove">✕</button>
+      </span></div>`).join('') : '<div class="empty">No invoice uploaded for this month yet.</div>';
+}
+async function onInvoiceFile(){
+  const inp = document.getElementById('inv-file');
+  const f = inp.files && inp.files[0]; if (!f) return;
+  const st = document.getElementById('inv-status');
+  if (f.size > 15*1024*1024){ st.textContent = '⚠ File too big (max 15 MB). Try a photo or a smaller PDF.'; inp.value=''; return; }
+  st.textContent = 'Uploading “'+f.name+'”…';
+  const { error } = await uploadInvoice(f, invUnitId, invMonth);
+  inp.value = '';
+  if (error){ st.textContent = '⚠ Upload failed — check internet and try again'; return; }
+  st.textContent = '✓ Saved';
+  renderInvoiceModal(); refreshAll();
+  toast('Invoice saved');
+}
+
 /* =================== Calendar =================== */
 function renderCalendar(){
   const mk = months.cal;
@@ -1270,7 +1357,7 @@ function enableNotifications(){
 }
 function exportBackup(){
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify({app:'crystal-estates-hub',exported:new Date().toISOString(),units,rents,washes,expenses,recurring},null,2)],{type:'application/json'}));
+  a.href = URL.createObjectURL(new Blob([JSON.stringify({app:'crystal-estates-hub',exported:new Date().toISOString(),units,rents,washes,expenses,recurring,invoices},null,2)],{type:'application/json'}));
   a.download = 'crystal-estates-backup-'+todayISO()+'.json'; a.click();
   toast('Backup downloaded');
 }
@@ -1282,10 +1369,10 @@ function importBackup(e){
       const d = JSON.parse(reader.result);
       if (!d.units || !Array.isArray(d.units)) throw new Error('Not a Crystal Estates backup file');
       if (!confirm('Restore backup from '+(d.exported||'unknown date')+'? This adds/updates '+d.units.length+' units, '+(d.rents||[]).length+' payments, '+(d.washes||[]).length+' car wash entries and '+(d.expenses||[]).length+' expenses for the whole team.')) return;
-      units=d.units; rents=d.rents||[]; washes=d.washes||[]; expenses=d.expenses||[]; recurring=d.recurring||recurring;
+      units=d.units; rents=d.rents||[]; washes=d.washes||[]; expenses=d.expenses||[]; recurring=d.recurring||recurring; invoices=d.invoices||invoices;
       await dbUpsertMany('ce_units',units); await dbUpsertMany('ce_rent_payments',rents);
       await dbUpsertMany('ce_carwash',washes); await dbUpsertMany('ce_expenses',expenses);
-      await dbUpsertMany('ce_recurring',recurring);
+      await dbUpsertMany('ce_recurring',recurring); await dbUpsertMany('ce_invoices',invoices);
       saveLocal(); refreshAll(); toast('Backup restored ✓');
     }catch(err){ toast('⚠ '+err.message); }
   };
