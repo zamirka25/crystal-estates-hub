@@ -401,10 +401,13 @@ td.num,th.num{text-align:right;}
         <div><label>Phone</label><input type="text" id="u-phone" placeholder="+966…"></div>
       </div>
       <div class="form-row">
-        <div><label>Monthly rent (SR)</label><input type="number" id="u-rent" step="0.01" min="0" placeholder="0.00"></div>
+        <div id="u-tenantid-wrap"><label>Tenant ID (Iqama / National ID)</label><input type="text" id="u-tenantid" placeholder="ID number"></div>
         <div><label>Tenant moved-in date</label><input type="date" id="u-startdate"></div>
       </div>
-      <div class="form-group"><label>Rent due day of month (1–28)</label><input type="number" id="u-dueday" min="1" max="28" value="1"></div>
+      <div class="form-row">
+        <div><label>Monthly rent (SR)</label><input type="number" id="u-rent" step="0.01" min="0" placeholder="0.00"></div>
+        <div><label>Rent due day (1–28)</label><input type="number" id="u-dueday" min="1" max="28" value="1"></div>
+      </div>
       <div class="form-group"><label>Notes</label><input type="text" id="u-notes" placeholder="Anything else about this unit or tenant"></div>
       <div class="modal-actions">
         <button type="button" class="btn btn-danger btn-sm" id="u-delete" onclick="deleteUnit()" style="margin-right:auto;">Delete</button>
@@ -534,6 +537,7 @@ let invUnitId = null, invMonth = null;
 let months = {};                       // per-tab selected month, YYYY-MM
 let rentProp = 'All', unitProp = 'All';
 let editingUnitId = null, payingUnitId = null, editingBillId = null, payingBillId = null, calSelectedDay = '', newUnitDraftId = null;
+let hasTenantIdCol = false;   // set true once we confirm the ce_units.tenant_id column exists in the cloud
 const LS = { units:'cex-units', rents:'cex-rents', washes:'cex-washes', expenses:'cex-expenses', recurring:'cex-recurring', invoices:'cex-invoices', settings:'cex-settings' };
 
 /* =================== Shared cloud database =================== */
@@ -542,8 +546,8 @@ const SUPA_KEY = 'sb_publishable_2peq2rE-7aAd3QTH1ESqzw_Vlt07Rlp';
 const db = window.supabase.createClient(SUPA_URL, SUPA_KEY);
 
 /* camelCase (app) <-> snake_case (database) */
-const unitToRow = u => ({ id:u.id, property:u.property, unit_no:u.unitNo, type:u.type||'Room', tenant:u.tenant||'', phone:u.phone||'', monthly_rent:u.monthlyRent==null?'':String(u.monthlyRent), due_day:+u.dueDay||1, status:u.status||'Occupied', notes:u.notes||'', start_date:u.startDate||'' });
-const rowToUnit = r => ({ id:r.id, property:r.property, unitNo:r.unit_no, type:r.type||'Room', tenant:r.tenant||'', phone:r.phone||'', monthlyRent:r.monthly_rent||'', dueDay:+r.due_day||1, status:r.status||'Occupied', notes:r.notes||'', startDate:r.start_date||'' });
+const unitToRow = u => { const r = { id:u.id, property:u.property, unit_no:u.unitNo, type:u.type||'Room', tenant:u.tenant||'', phone:u.phone||'', monthly_rent:u.monthlyRent==null?'':String(u.monthlyRent), due_day:+u.dueDay||1, status:u.status||'Occupied', notes:u.notes||'', start_date:u.startDate||'' }; if (hasTenantIdCol) r.tenant_id = u.tenantId||''; return r; };
+const rowToUnit = r => ({ id:r.id, property:r.property, unitNo:r.unit_no, type:r.type||'Room', tenant:r.tenant||'', phone:r.phone||'', monthlyRent:r.monthly_rent||'', dueDay:+r.due_day||1, status:r.status||'Occupied', notes:r.notes||'', startDate:r.start_date||'', tenantId:r.tenant_id||'' });
 const rentToRow = p => ({ id:p.id, unit_id:p.unitId||'', property:p.property||'', month_for:p.monthFor||'', paid_date:p.paidDate||'', amount:p.amount==null?'':String(p.amount), method:p.method||'', notes:p.notes||'' });
 const rowToRent = r => ({ id:r.id, unitId:r.unit_id||'', property:r.property||'', monthFor:r.month_for||'', paidDate:r.paid_date||'', amount:r.amount||'', method:r.method||'', notes:r.notes||'' });
 const washToRow = w => ({ id:w.id, date:w.date||'', wash_type:w.washType||'Manual', amount:w.amount==null?'':String(w.amount), notes:w.notes||'' });
@@ -570,6 +574,7 @@ async function fetchAll(){
   ]);
   const err = u.error||r.error||w.error||x.error||b.error||iv.error;
   if (err) throw err;
+  hasTenantIdCol = !!(u.data && u.data.length && ('tenant_id' in u.data[0]));
   units = u.data.map(rowToUnit); rents = r.data.map(rowToRent);
   washes = w.data.map(rowToWash); expenses = x.data.map(rowToExp);
   recurring = b.data.map(rowToRec); invoices = iv.data.map(rowToInv);
@@ -879,7 +884,7 @@ function renderUnits(){
       const notes = u.notes ? '<br><span class="muted">'+esc(u.notes)+'</span>' : '';
       return `<tr onclick="openUnitModal('${u.id}')" style="cursor:pointer;">
       <td><b>${esc(u.unitNo)}</b> <span class="muted">${esc(u.type)}</span>${notes}</td>
-      <td>${esc(u.tenant)||'<span class="muted">— no tenant —</span>'}${u.phone?'<br><span class="muted">'+esc(u.phone)+'</span>':''}${since}</td>
+      <td>${esc(u.tenant)||'<span class="muted">— no tenant —</span>'}${u.phone?'<br><span class="muted">'+esc(u.phone)+'</span>':''}${u.tenantId?'<br><span class="muted">ID '+esc(u.tenantId)+'</span>':''}${since}</td>
       <td class="num">${amt(u.monthlyRent)>0?money(amt(u.monthlyRent)):'<span class="muted">not set</span>'}<br><span class="muted">due day ${esc(u.dueDay)}</span></td>
       <td>${u.status==='Vacant'?'<span class="chip vacant">Not occupied</span>':'<span class="chip paid">Occupied</span>'}</td>
       <td class="no-print" style="text-align:right;"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openUnitModal('${u.id}')">✎ Edit</button></td></tr>`;
@@ -902,13 +907,15 @@ function openUnitModal(id){
   newUnitDraftId = id ? null : ('U'+Date.now().toString(36)+Math.random().toString(36).slice(2,6));
   document.getElementById('unit-modal-title').textContent = id ? 'Edit unit' : 'Add unit';
   document.getElementById('u-delete').style.display = id ? '' : 'none';
-  const u = id ? units.find(x=>x.id===id) : { property:'Awali', type:'Room', unitNo:'', tenant:'', phone:'', monthlyRent:'', dueDay:1, status:'Occupied', notes:'', startDate:'' };
+  const u = id ? units.find(x=>x.id===id) : { property:'Awali', type:'Room', unitNo:'', tenant:'', phone:'', monthlyRent:'', dueDay:1, status:'Occupied', notes:'', startDate:'', tenantId:'' };
   if (!u) return;
   document.getElementById('u-prop').value = u.property;
   document.getElementById('u-type').value = u.type||'Room';
   document.getElementById('u-no').value = u.unitNo;
   document.getElementById('u-tenant').value = u.tenant;
   document.getElementById('u-phone').value = u.phone;
+  document.getElementById('u-tenantid').value = u.tenantId||'';
+  document.getElementById('u-tenantid-wrap').style.display = hasTenantIdCol ? '' : 'none';
   document.getElementById('u-rent').value = u.monthlyRent;
   document.getElementById('u-dueday').value = u.dueDay||1;
   document.getElementById('u-status').value = u.status||'Occupied';
@@ -934,6 +941,7 @@ async function saveUnit(e){
   u.unitNo = name;
   u.tenant = document.getElementById('u-tenant').value.trim();
   u.phone = document.getElementById('u-phone').value.trim();
+  u.tenantId = document.getElementById('u-tenantid').value.trim();
   u.monthlyRent = document.getElementById('u-rent').value;
   u.dueDay = +document.getElementById('u-dueday').value||1;
   u.status = document.getElementById('u-status').value;
