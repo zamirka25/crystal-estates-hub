@@ -402,7 +402,7 @@ td.num,th.num{text-align:right;}
       </div>
       <div class="form-row">
         <div><label>Monthly rent (SR)</label><input type="number" id="u-rent" step="0.01" min="0" placeholder="0.00"></div>
-        <div><label>Rent start date</label><input type="date" id="u-startdate"></div>
+        <div><label>Tenant moved-in date</label><input type="date" id="u-startdate"></div>
       </div>
       <div class="form-group"><label>Rent due day of month (1–28)</label><input type="number" id="u-dueday" min="1" max="28" value="1"></div>
       <div class="form-group"><label>Notes</label><input type="text" id="u-notes" placeholder="Anything else about this unit or tenant"></div>
@@ -514,7 +514,7 @@ td.num,th.num{text-align:right;}
 let units = [], rents = [], washes = [], expenses = [], recurring = [], settings = { currency: 'SAR' };
 let months = {};                       // per-tab selected month, YYYY-MM
 let rentProp = 'All', unitProp = 'All';
-let editingUnitId = null, payingUnitId = null, editingBillId = null, payingBillId = null, calSelectedDay = '';
+let editingUnitId = null, payingUnitId = null, editingBillId = null, payingBillId = null, calSelectedDay = '', newUnitDraftId = null;
 const LS = { units:'cex-units', rents:'cex-rents', washes:'cex-washes', expenses:'cex-expenses', recurring:'cex-recurring', settings:'cex-settings' };
 
 /* =================== Shared cloud database =================== */
@@ -653,13 +653,12 @@ async function autoSeedIfEmpty(){
   saveLocal();
 }
 async function reseedUnits(){
-  const have = new Set(units.map(u=>u.id));
-  const missing = defaultUnits().filter(u=>!have.has(u.id));
-  if (!missing.length){ toast('All default units are already there'); return; }
-  units = units.concat(missing);
-  await dbUpsertMany('ce_units', missing);
-  saveLocal(); refreshAll();
-  toast('Restored '+missing.length+' unit(s)');
+  // Non-destructive: INSERT only default units whose id is not already in the cloud, and never
+  // overwrite a live tenant/rent/date row. ignoreDuplicates => ON CONFLICT (id) DO NOTHING.
+  const { error } = await db.from('ce_units').upsert(defaultUnits().map(unitToRow), { onConflict:'id', ignoreDuplicates:true });
+  if (error){ toast('⚠ '+error.message); return; }
+  await fetchAll(); refreshAll();
+  toast('Restored any missing default units');
 }
 
 /* =================== Rent logic =================== */
@@ -851,7 +850,7 @@ function renderUnits(){
       .sort((a,b)=>String(a.id).localeCompare(String(b.id),undefined,{numeric:true}));
     const occ = units.filter(u=>u.property===p&&u.status!=='Vacant').length;
     const rows = list.map(u=>{
-      const since = u.startDate ? '<br><span class="muted">since '+new Date(u.startDate+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'</span>' : '';
+      const since = u.startDate ? '<br><span class="muted">moved in '+new Date(u.startDate+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'</span>' : '';
       const notes = u.notes ? '<br><span class="muted">'+esc(u.notes)+'</span>' : '';
       return `<tr onclick="openUnitModal('${u.id}')" style="cursor:pointer;">
       <td><b>${esc(u.unitNo)}</b> <span class="muted">${esc(u.type)}</span>${notes}</td>
@@ -873,6 +872,9 @@ function onUnitStatusChange(){
 }
 function openUnitModal(id){
   editingUnitId = id || null;
+  // Mint the new unit's id once, when the editor opens, so a retry after a dropped network
+  // response updates the same row instead of creating a second copy.
+  newUnitDraftId = id ? null : ('U'+Date.now().toString(36)+Math.random().toString(36).slice(2,6));
   document.getElementById('unit-modal-title').textContent = id ? 'Edit unit' : 'Add unit';
   document.getElementById('u-delete').style.display = id ? '' : 'none';
   const u = id ? units.find(x=>x.id===id) : { property:'Awali', type:'Room', unitNo:'', tenant:'', phone:'', monthlyRent:'', dueDay:1, status:'Occupied', notes:'', startDate:'' };
@@ -896,10 +898,12 @@ async function saveUnit(e){
   const name = document.getElementById('u-no').value.trim();
   if (!name){ toast('Please give the unit a name / number'); return; }
   // Build the updated values first (don't mutate the live array until the save succeeds)
-  const isNew = !editingUnitId;
   const existing = editingUnitId ? units.find(x=>x.id===editingUnitId) : null;
   if (editingUnitId && !existing) return;
-  const u = existing ? Object.assign({}, existing) : { id:nextId('U',units.filter(x=>/^U\d/.test(x.id)),3) };
+  // New units use the id minted when the editor opened (stable across retries; time+random so two
+  // people adding at once can never collide). Fallback mints one if somehow absent.
+  const u = existing ? Object.assign({}, existing)
+    : { id: newUnitDraftId || ('U'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)) };
   u.property = document.getElementById('u-prop').value;
   u.type = document.getElementById('u-type').value;
   u.unitNo = name;
@@ -918,9 +922,9 @@ async function saveUnit(e){
     toast('⚠ Could not save — check your internet and try again');
     return;
   }
-  // Only now commit to the live array + local cache
-  if (isNew) units.push(u);
-  else { const i = units.findIndex(x=>x.id===u.id); if (i>=0) units[i]=u; }
+  // Only now commit to the live array + local cache. Idempotent by id: if a realtime echo of our
+  // own upsert already inserted this unit while we awaited, replace it rather than pushing a duplicate.
+  { const i = units.findIndex(x=>x.id===u.id); if (i>=0) units[i]=u; else units.push(u); }
   saveLocal();
   closeModal('unit-modal'); refreshAll();
   toast('✓ Saved — '+u.unitNo+(u.tenant?' · '+u.tenant:''));
