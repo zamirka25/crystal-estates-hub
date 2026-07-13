@@ -488,7 +488,7 @@ td.num,th.num{text-align:right;}
     <div id="inv-list"></div>
     <div class="form-group" style="margin-top:14px;">
       <label>Upload invoice (PDF or photo)</label>
-      <input type="file" id="inv-file" accept="application/pdf,image/*" capture="environment" onchange="onInvoiceFile()">
+      <input type="file" id="inv-file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,image/gif" onchange="onInvoiceFile()">
       <p id="inv-status" class="muted" style="margin-top:6px;min-height:18px;"></p>
       <p class="muted" style="font-size:12px;">Tip: on your phone you can take a photo of a paper invoice, or pick a PDF. Files are kept private — only signed-in team members can open them.</p>
     </div>
@@ -702,8 +702,8 @@ function unitRentStatus(u, mk){
   return 'due';
 }
 const STATUS_CHIP = {
-  paid:'<span class="chip paid">Paid</span>', partial:'<span class="chip partial">Partial</span>',
-  due:'<span class="chip due">Due</span>', overdue:'<span class="chip overdue">Overdue</span>',
+  paid:'<span class="chip paid">Paid</span>', partial:'<span class="chip partial">Part-paid</span>',
+  due:'<span class="chip due">Not paid</span>', overdue:'<span class="chip overdue">Not paid (late)</span>',
   vacant:'<span class="chip vacant">Vacant</span>', norent:'<span class="chip norent">Rent not set</span>'
 };
 function monthStats(mk, prop){
@@ -818,8 +818,8 @@ function renderRent(){
     const s = unitRentStatus(u,mk), paid = paidAmount(u.id,mk), pays = paymentsFor(u.id,mk);
     let action = '';
     if (u.status!=='Vacant'){
-      if (s==='paid') action = `<button class="btn btn-ghost btn-sm" onclick="undoPayment('${u.id}')" title="Remove last payment">↺ Undo</button>`;
-      else action = `<button class="btn btn-primary btn-sm" onclick="openPayModal('${u.id}')">Record</button>`;
+      if (s==='paid') action = `<button class="btn btn-ghost btn-sm" onclick="undoPayment('${u.id}')" title="Mark as not paid (removes this month's payment)">Mark not paid</button>`;
+      else action = `<button class="btn btn-primary btn-sm" onclick="openPayModal('${u.id}')">Mark paid</button>`;
     }
     const paidNote = pays.length ? `<br><span class="muted">${money(paid)} on ${fmtDate(pays[pays.length-1].paidDate)}</span>` : '';
     const invN = invoicesFor(u.id, mk).length;
@@ -837,7 +837,7 @@ function openPayModal(unitId){
   payingUnitId = unitId;
   const mk = months.rent;
   const left = Math.max(0, amt(u.monthlyRent) - paidAmount(unitId,mk));
-  document.getElementById('pay-modal-title').textContent = 'Record rent — '+u.property+' · '+u.unitNo;
+  document.getElementById('pay-modal-title').textContent = 'Mark paid — '+u.property+' · '+u.unitNo;
   document.getElementById('pay-modal-sub').textContent = (u.tenant?u.tenant+' — ':'')+monthLabel(mk);
   document.getElementById('p-amount').value = left || amt(u.monthlyRent) || '';
   document.getElementById('p-date').value = todayISO();
@@ -1123,7 +1123,9 @@ async function uploadInvoice(file, unitId, mk){
   if (up.error) return { error: up.error };
   const inv = { id:'INV'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), unitId, monthFor:mk, filePath:path, fileName:file.name||safe, notes:'' };
   const { error } = await dbUpsert('ce_invoices', inv);
-  if (error){ db.storage.from('invoices').remove([path]); return { error }; }   // don't leave an orphan file
+  // If the metadata write errors we KEEP the uploaded file: a dropped response may mean the row actually
+  // committed (it will sync back on reload) — deleting the file would leave a record pointing at nothing.
+  if (error) return { error };
   const i = invoices.findIndex(v=>v.id===inv.id); if (i>=0) invoices[i]=inv; else invoices.push(inv);
   saveLocal();
   return { inv };
@@ -1131,14 +1133,17 @@ async function uploadInvoice(file, unitId, mk){
 async function viewInvoice(id){
   const v = findInv(id); if (!v) return;
   const { data, error } = await db.storage.from('invoices').createSignedUrl(v.filePath, 3600);
-  if (error){ toast('⚠ Could not open: '+error.message); return; }
-  window.open(data.signedUrl, '_blank');
+  if (error){ toast('⚠ Could not open — the file may have been removed'); return; }
+  window.open(data.signedUrl, '_blank', 'noopener');
 }
 async function removeInvoice(id){
   const v = findInv(id); if (!v) return;
   if (!confirm('Remove the invoice "'+v.fileName+'"? This deletes the file for the whole team.')) return;
-  await db.storage.from('invoices').remove([v.filePath]);
-  invoices = invoices.filter(x=>x.id!==id); dbDelete('ce_invoices', id); saveLocal();
+  // Delete the record first (the source of truth). If this fails, nothing is lost — file + row stay intact.
+  const { error } = await db.from('ce_invoices').delete().eq('id', id);
+  if (error){ toast('⚠ Could not remove — check internet and try again'); return; }
+  db.storage.from('invoices').remove([v.filePath]);   // best-effort file cleanup (a leftover file is private + harmless)
+  invoices = invoices.filter(x=>x.id!==id); saveLocal();
   renderInvoiceModal(); refreshAll();
   toast('Invoice removed');
 }
@@ -1165,6 +1170,10 @@ async function onInvoiceFile(){
   const inp = document.getElementById('inv-file');
   const f = inp.files && inp.files[0]; if (!f) return;
   const st = document.getElementById('inv-status');
+  // Only allow real documents/photos — reject SVG/HTML etc. (which could carry scripts) by type AND extension.
+  const okType = /^(application\/pdf|image\/(jpe?g|png|webp|heic|heif|gif))$/i.test(f.type||'');
+  const okExt  = /\.(pdf|jpe?g|png|webp|heic|heif|gif)$/i.test(f.name||'');
+  if (!okType && !okExt){ st.textContent = '⚠ Please choose a PDF or a photo (JPG/PNG). Other file types aren’t allowed.'; inp.value=''; return; }
   if (f.size > 15*1024*1024){ st.textContent = '⚠ File too big (max 15 MB). Try a photo or a smaller PDF.'; inp.value=''; return; }
   st.textContent = 'Uploading “'+f.name+'”…';
   const { error } = await uploadInvoice(f, invUnitId, invMonth);
@@ -1368,7 +1377,7 @@ function importBackup(e){
     try{
       const d = JSON.parse(reader.result);
       if (!d.units || !Array.isArray(d.units)) throw new Error('Not a Crystal Estates backup file');
-      if (!confirm('Restore backup from '+(d.exported||'unknown date')+'? This adds/updates '+d.units.length+' units, '+(d.rents||[]).length+' payments, '+(d.washes||[]).length+' car wash entries and '+(d.expenses||[]).length+' expenses for the whole team.')) return;
+      if (!confirm('Restore backup from '+(d.exported||'unknown date')+'? This adds/updates '+d.units.length+' units, '+(d.rents||[]).length+' payments, '+(d.washes||[]).length+' car wash entries, '+(d.expenses||[]).length+' expenses and '+(d.invoices||[]).length+' invoice records for the whole team.\n\nNote: invoice files themselves are not stored in backups — only their records.')) return;
       units=d.units; rents=d.rents||[]; washes=d.washes||[]; expenses=d.expenses||[]; recurring=d.recurring||recurring; invoices=d.invoices||invoices;
       await dbUpsertMany('ce_units',units); await dbUpsertMany('ce_rent_payments',rents);
       await dbUpsertMany('ce_carwash',washes); await dbUpsertMany('ce_expenses',expenses);

@@ -78,7 +78,7 @@ create table if not exists ce_invoices (
 );
 
 insert into storage.buckets (id, name, public) values ('invoices','invoices', false)
-  on conflict (id) do nothing;
+  on conflict (id) do update set public = false;   -- always enforce private, even if the bucket already existed
 
 -- Security: only signed-in team members can read or write
 alter table ce_units enable row level security;
