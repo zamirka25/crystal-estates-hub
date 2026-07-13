@@ -537,7 +537,6 @@ let invUnitId = null, invMonth = null;
 let months = {};                       // per-tab selected month, YYYY-MM
 let rentProp = 'All', unitProp = 'All';
 let editingUnitId = null, payingUnitId = null, editingBillId = null, payingBillId = null, calSelectedDay = '', newUnitDraftId = null;
-let hasTenantIdCol = false;   // set true once we confirm the ce_units.tenant_id column exists in the cloud
 const LS = { units:'cex-units', rents:'cex-rents', washes:'cex-washes', expenses:'cex-expenses', recurring:'cex-recurring', invoices:'cex-invoices', settings:'cex-settings' };
 
 /* =================== Shared cloud database =================== */
@@ -546,8 +545,14 @@ const SUPA_KEY = 'sb_publishable_2peq2rE-7aAd3QTH1ESqzw_Vlt07Rlp';
 const db = window.supabase.createClient(SUPA_URL, SUPA_KEY);
 
 /* camelCase (app) <-> snake_case (database) */
-const unitToRow = u => { const r = { id:u.id, property:u.property, unit_no:u.unitNo, type:u.type||'Room', tenant:u.tenant||'', phone:u.phone||'', monthly_rent:u.monthlyRent==null?'':String(u.monthlyRent), due_day:+u.dueDay||1, status:u.status||'Occupied', notes:u.notes||'', start_date:u.startDate||'' }; if (hasTenantIdCol) r.tenant_id = u.tenantId||''; return r; };
-const rowToUnit = r => ({ id:r.id, property:r.property, unitNo:r.unit_no, type:r.type||'Room', tenant:r.tenant||'', phone:r.phone||'', monthlyRent:r.monthly_rent||'', dueDay:+r.due_day||1, status:r.status||'Occupied', notes:r.notes||'', startDate:r.start_date||'', tenantId:r.tenant_id||'' });
+// Tenant ID is stored inside the notes column behind an invisible marker (no schema change needed).
+// The marker (SOH control char) is never typed by users, so the user's own notes stay clean.
+const TID_SEP = String.fromCharCode(1);
+const TID_MARK = TID_SEP + 'TID:';
+function encTIDNotes(notes, tenantId){ const base=(notes||'').split(TID_SEP)[0]; return tenantId ? base+TID_MARK+tenantId : base; }
+function decTIDNotes(raw){ const s=raw||''; const i=s.indexOf(TID_MARK); return i<0 ? {notes:s,tenantId:''} : {notes:s.slice(0,i),tenantId:s.slice(i+TID_MARK.length)}; }
+const unitToRow = u => ({ id:u.id, property:u.property, unit_no:u.unitNo, type:u.type||'Room', tenant:u.tenant||'', phone:u.phone||'', monthly_rent:u.monthlyRent==null?'':String(u.monthlyRent), due_day:+u.dueDay||1, status:u.status||'Occupied', notes:encTIDNotes(u.notes, u.tenantId), start_date:u.startDate||'' });
+const rowToUnit = r => { const d=decTIDNotes(r.notes); return { id:r.id, property:r.property, unitNo:r.unit_no, type:r.type||'Room', tenant:r.tenant||'', phone:r.phone||'', monthlyRent:r.monthly_rent||'', dueDay:+r.due_day||1, status:r.status||'Occupied', notes:d.notes, startDate:r.start_date||'', tenantId:d.tenantId }; };
 const rentToRow = p => ({ id:p.id, unit_id:p.unitId||'', property:p.property||'', month_for:p.monthFor||'', paid_date:p.paidDate||'', amount:p.amount==null?'':String(p.amount), method:p.method||'', notes:p.notes||'' });
 const rowToRent = r => ({ id:r.id, unitId:r.unit_id||'', property:r.property||'', monthFor:r.month_for||'', paidDate:r.paid_date||'', amount:r.amount||'', method:r.method||'', notes:r.notes||'' });
 const washToRow = w => ({ id:w.id, date:w.date||'', wash_type:w.washType||'Manual', amount:w.amount==null?'':String(w.amount), notes:w.notes||'' });
@@ -574,7 +579,6 @@ async function fetchAll(){
   ]);
   const err = u.error||r.error||w.error||x.error||b.error||iv.error;
   if (err) throw err;
-  hasTenantIdCol = !!(u.data && u.data.length && ('tenant_id' in u.data[0]));
   units = u.data.map(rowToUnit); rents = r.data.map(rowToRent);
   washes = w.data.map(rowToWash); expenses = x.data.map(rowToExp);
   recurring = b.data.map(rowToRec); invoices = iv.data.map(rowToInv);
@@ -915,7 +919,6 @@ function openUnitModal(id){
   document.getElementById('u-tenant').value = u.tenant;
   document.getElementById('u-phone').value = u.phone;
   document.getElementById('u-tenantid').value = u.tenantId||'';
-  document.getElementById('u-tenantid-wrap').style.display = hasTenantIdCol ? '' : 'none';
   document.getElementById('u-rent').value = u.monthlyRent;
   document.getElementById('u-dueday').value = u.dueDay||1;
   document.getElementById('u-status').value = u.status||'Occupied';
