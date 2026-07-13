@@ -392,20 +392,24 @@ td.num,th.num{text-align:right;}
         <div><label>Type</label><select id="u-type"><option>Room</option><option>Flat</option><option>Shop</option></select></div>
       </div>
       <div class="form-group"><label>Unit name / number</label><input type="text" id="u-no" required placeholder="e.g. Room 5, Flat 12, Shop"></div>
-      <div class="form-row">
-        <div><label>Tenant</label><input type="text" id="u-tenant" placeholder="Name"></div>
-        <div><label>Phone</label><input type="text" id="u-phone" placeholder="+…"></div>
+      <div class="form-group">
+        <label>Occupancy status</label>
+        <select id="u-status" onchange="onUnitStatusChange()"><option value="Occupied">Occupied</option><option value="Vacant">Not occupied (vacant)</option></select>
       </div>
       <div class="form-row">
-        <div><label>Monthly rent</label><input type="number" id="u-rent" step="0.001" min="0" placeholder="0.00"></div>
-        <div><label>Rent due day</label><input type="number" id="u-dueday" min="1" max="28" value="1"></div>
-        <div><label>Status</label><select id="u-status"><option>Occupied</option><option>Vacant</option></select></div>
+        <div><label>Tenant name</label><input type="text" id="u-tenant" placeholder="Full name"></div>
+        <div><label>Phone</label><input type="text" id="u-phone" placeholder="+966…"></div>
       </div>
-      <div class="form-group"><label>Notes</label><input type="text" id="u-notes"></div>
+      <div class="form-row">
+        <div><label>Monthly rent (SR)</label><input type="number" id="u-rent" step="0.01" min="0" placeholder="0.00"></div>
+        <div><label>Rent start date</label><input type="date" id="u-startdate"></div>
+      </div>
+      <div class="form-group"><label>Rent due day of month (1–28)</label><input type="number" id="u-dueday" min="1" max="28" value="1"></div>
+      <div class="form-group"><label>Notes</label><input type="text" id="u-notes" placeholder="Anything else about this unit or tenant"></div>
       <div class="modal-actions">
         <button type="button" class="btn btn-danger btn-sm" id="u-delete" onclick="deleteUnit()" style="margin-right:auto;">Delete</button>
         <button type="button" class="btn btn-ghost" onclick="closeModal('unit-modal')">Cancel</button>
-        <button type="submit" class="btn btn-primary">Save</button>
+        <button type="submit" class="btn btn-primary" id="u-save">💾 Save</button>
       </div>
     </form>
   </div>
@@ -519,8 +523,8 @@ const SUPA_KEY = 'sb_publishable_2peq2rE-7aAd3QTH1ESqzw_Vlt07Rlp';
 const db = window.supabase.createClient(SUPA_URL, SUPA_KEY);
 
 /* camelCase (app) <-> snake_case (database) */
-const unitToRow = u => ({ id:u.id, property:u.property, unit_no:u.unitNo, type:u.type||'Room', tenant:u.tenant||'', phone:u.phone||'', monthly_rent:u.monthlyRent==null?'':String(u.monthlyRent), due_day:+u.dueDay||1, status:u.status||'Occupied', notes:u.notes||'' });
-const rowToUnit = r => ({ id:r.id, property:r.property, unitNo:r.unit_no, type:r.type||'Room', tenant:r.tenant||'', phone:r.phone||'', monthlyRent:r.monthly_rent||'', dueDay:+r.due_day||1, status:r.status||'Occupied', notes:r.notes||'' });
+const unitToRow = u => ({ id:u.id, property:u.property, unit_no:u.unitNo, type:u.type||'Room', tenant:u.tenant||'', phone:u.phone||'', monthly_rent:u.monthlyRent==null?'':String(u.monthlyRent), due_day:+u.dueDay||1, status:u.status||'Occupied', notes:u.notes||'', start_date:u.startDate||'' });
+const rowToUnit = r => ({ id:r.id, property:r.property, unitNo:r.unit_no, type:r.type||'Room', tenant:r.tenant||'', phone:r.phone||'', monthlyRent:r.monthly_rent||'', dueDay:+r.due_day||1, status:r.status||'Occupied', notes:r.notes||'', startDate:r.start_date||'' });
 const rentToRow = p => ({ id:p.id, unit_id:p.unitId||'', property:p.property||'', month_for:p.monthFor||'', paid_date:p.paidDate||'', amount:p.amount==null?'':String(p.amount), method:p.method||'', notes:p.notes||'' });
 const rowToRent = r => ({ id:r.id, unitId:r.unit_id||'', property:r.property||'', monthFor:r.month_for||'', paidDate:r.paid_date||'', amount:r.amount||'', method:r.method||'', notes:r.notes||'' });
 const washToRow = w => ({ id:w.id, date:w.date||'', wash_type:w.washType||'Manual', amount:w.amount==null?'':String(w.amount), notes:w.notes||'' });
@@ -533,7 +537,7 @@ const TABLE_MAP = { ce_units:[unitToRow,rowToUnit], ce_rent_payments:[rentToRow,
 const stateFor = t => t==='ce_units'?units : t==='ce_rent_payments'?rents : t==='ce_carwash'?washes : t==='ce_recurring'?recurring : expenses;
 const setState = (t,a) => { if(t==='ce_units')units=a; else if(t==='ce_rent_payments')rents=a; else if(t==='ce_carwash')washes=a; else if(t==='ce_recurring')recurring=a; else expenses=a; };
 
-function dbUpsert(table,obj){ db.from(table).upsert(TABLE_MAP[table][0](obj)).then(({error})=>{ if(error) toast('⚠ Sync failed: '+error.message); }); }
+function dbUpsert(table,obj){ return db.from(table).upsert(TABLE_MAP[table][0](obj)).then(({error})=>{ if(error) toast('⚠ Sync failed: '+error.message); return { error }; }); }
 function dbUpsertMany(table,objs){ if(!objs.length) return Promise.resolve(); return db.from(table).upsert(objs.map(TABLE_MAP[table][0])).then(({error})=>{ if(error) toast('⚠ Sync failed: '+error.message); }); }
 function dbDelete(table,id){ db.from(table).delete().eq('id',id).then(({error})=>{ if(error) toast('⚠ Sync failed: '+error.message); }); }
 
@@ -797,10 +801,10 @@ function renderRent(){
     }
     const paidNote = pays.length ? `<br><span class="muted">${money(paid)} on ${fmtDate(pays[pays.length-1].paidDate)}</span>` : '';
     return `<tr><td><b>${esc(u.property)}</b> · ${esc(u.unitNo)}</td>
-      <td>${esc(u.tenant)||'<span class="muted">—</span>'}</td>
+      <td>${esc(u.tenant)||'<span class="muted">— add tenant —</span>'}</td>
       <td class="num">${amt(u.monthlyRent)>0?money(amt(u.monthlyRent)):'<span class="muted">not set</span>'}</td>
       <td>${STATUS_CHIP[s]}${paidNote}</td>
-      <td class="no-print" style="text-align:right;">${action}</td></tr>`;
+      <td class="no-print" style="text-align:right;white-space:nowrap;">${action} <button class="btn btn-ghost btn-sm" onclick="openUnitModal('${u.id}')" title="Edit tenant, rent, date or status">✎ Edit</button></td></tr>`;
   }).join('') || '<tr><td colspan="5" class="empty">No units match.</td></tr>';
 }
 
@@ -846,24 +850,32 @@ function renderUnits(){
       .filter(u=>!q || (u.unitNo+' '+u.tenant+' '+u.phone).toLowerCase().includes(q))
       .sort((a,b)=>String(a.id).localeCompare(String(b.id),undefined,{numeric:true}));
     const occ = units.filter(u=>u.property===p&&u.status!=='Vacant').length;
-    const rows = list.map(u=>`<tr onclick="openUnitModal('${u.id}')" style="cursor:pointer;">
-      <td><b>${esc(u.unitNo)}</b> <span class="muted">${esc(u.type)}</span></td>
-      <td>${esc(u.tenant)||'<span class="muted">—</span>'}<br><span class="muted">${esc(u.phone)}</span></td>
-      <td class="num">${amt(u.monthlyRent)>0?money(amt(u.monthlyRent)):'<span class="muted">not set</span>'}</td>
-      <td class="num">${esc(u.dueDay)}</td>
-      <td>${u.status==='Vacant'?'<span class="chip vacant">Vacant</span>':'<span class="chip paid">Occupied</span>'}</td>
-      <td class="muted">${esc(u.notes)}</td></tr>`).join('');
+    const rows = list.map(u=>{
+      const since = u.startDate ? '<br><span class="muted">since '+new Date(u.startDate+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'</span>' : '';
+      const notes = u.notes ? '<br><span class="muted">'+esc(u.notes)+'</span>' : '';
+      return `<tr onclick="openUnitModal('${u.id}')" style="cursor:pointer;">
+      <td><b>${esc(u.unitNo)}</b> <span class="muted">${esc(u.type)}</span>${notes}</td>
+      <td>${esc(u.tenant)||'<span class="muted">— no tenant —</span>'}${u.phone?'<br><span class="muted">'+esc(u.phone)+'</span>':''}${since}</td>
+      <td class="num">${amt(u.monthlyRent)>0?money(amt(u.monthlyRent)):'<span class="muted">not set</span>'}<br><span class="muted">due day ${esc(u.dueDay)}</span></td>
+      <td>${u.status==='Vacant'?'<span class="chip vacant">Not occupied</span>':'<span class="chip paid">Occupied</span>'}</td>
+      <td class="no-print" style="text-align:right;"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openUnitModal('${u.id}')">✎ Edit</button></td></tr>`;
+    }).join('');
     return `<div class="prop-head"><h4>${p} Building</h4><span class="muted">${occ} occupied of ${units.filter(u=>u.property===p).length}</span></div>
       <div class="panel tbl-wrap"><table>
-        <thead><tr><th>Unit</th><th>Tenant</th><th class="num">Rent</th><th class="num">Due day</th><th>Status</th><th>Notes</th></tr></thead>
-        <tbody>${rows||'<tr><td colspan="6" class="empty">No units.</td></tr>'}</tbody></table></div>`;
+        <thead><tr><th>Unit</th><th>Tenant</th><th class="num">Rent</th><th>Status</th><th class="no-print"></th></tr></thead>
+        <tbody>${rows||'<tr><td colspan="5" class="empty">No units.</td></tr>'}</tbody></table></div>`;
   }).join('');
+}
+function onUnitStatusChange(){
+  // When a unit is marked not-occupied, grey out the tenant fields as a hint (values are kept)
+  const vacant = document.getElementById('u-status').value === 'Vacant';
+  ['u-tenant','u-phone'].forEach(idf=>{ const el=document.getElementById(idf); el.style.opacity = vacant?0.5:1; });
 }
 function openUnitModal(id){
   editingUnitId = id || null;
   document.getElementById('unit-modal-title').textContent = id ? 'Edit unit' : 'Add unit';
   document.getElementById('u-delete').style.display = id ? '' : 'none';
-  const u = id ? units.find(x=>x.id===id) : { property:'Awali', type:'Room', unitNo:'', tenant:'', phone:'', monthlyRent:'', dueDay:1, status:'Occupied', notes:'' };
+  const u = id ? units.find(x=>x.id===id) : { property:'Awali', type:'Room', unitNo:'', tenant:'', phone:'', monthlyRent:'', dueDay:1, status:'Occupied', notes:'', startDate:'' };
   if (!u) return;
   document.getElementById('u-prop').value = u.property;
   document.getElementById('u-type').value = u.type||'Room';
@@ -873,25 +885,45 @@ function openUnitModal(id){
   document.getElementById('u-rent').value = u.monthlyRent;
   document.getElementById('u-dueday').value = u.dueDay||1;
   document.getElementById('u-status').value = u.status||'Occupied';
+  document.getElementById('u-startdate').value = u.startDate||'';
   document.getElementById('u-notes').value = u.notes;
+  onUnitStatusChange();
   document.getElementById('unit-modal').classList.add('show');
 }
-function saveUnit(e){
+async function saveUnit(e){
   e.preventDefault();
-  let u = editingUnitId ? units.find(x=>x.id===editingUnitId) : null;
-  if (!u){ u = { id:nextId('U',units.filter(x=>/^U\d/.test(x.id)),3) }; units.push(u); }
+  const btn = document.getElementById('u-save');
+  const name = document.getElementById('u-no').value.trim();
+  if (!name){ toast('Please give the unit a name / number'); return; }
+  // Build the updated values first (don't mutate the live array until the save succeeds)
+  const isNew = !editingUnitId;
+  const existing = editingUnitId ? units.find(x=>x.id===editingUnitId) : null;
+  if (editingUnitId && !existing) return;
+  const u = existing ? Object.assign({}, existing) : { id:nextId('U',units.filter(x=>/^U\d/.test(x.id)),3) };
   u.property = document.getElementById('u-prop').value;
   u.type = document.getElementById('u-type').value;
-  u.unitNo = document.getElementById('u-no').value.trim();
+  u.unitNo = name;
   u.tenant = document.getElementById('u-tenant').value.trim();
   u.phone = document.getElementById('u-phone').value.trim();
   u.monthlyRent = document.getElementById('u-rent').value;
   u.dueDay = +document.getElementById('u-dueday').value||1;
   u.status = document.getElementById('u-status').value;
+  u.startDate = document.getElementById('u-startdate').value;
   u.notes = document.getElementById('u-notes').value.trim();
-  dbUpsert('ce_units',u); saveLocal();
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const { error } = await dbUpsert('ce_units', u);
+  btn.disabled = false; btn.textContent = '💾 Save';
+  if (error){
+    // Keep the form open so nothing typed is lost
+    toast('⚠ Could not save — check your internet and try again');
+    return;
+  }
+  // Only now commit to the live array + local cache
+  if (isNew) units.push(u);
+  else { const i = units.findIndex(x=>x.id===u.id); if (i>=0) units[i]=u; }
+  saveLocal();
   closeModal('unit-modal'); refreshAll();
-  toast('Unit saved');
+  toast('✓ Saved — '+u.unitNo+(u.tenant?' · '+u.tenant:''));
 }
 function deleteUnit(){
   if (!editingUnitId) return;

@@ -12,8 +12,11 @@ create table if not exists ce_units (
   due_day int default 1,
   status text default 'Occupied',
   notes text default '',
+  start_date text default '',
   updated_at timestamptz default now()
 );
+
+alter table ce_units add column if not exists start_date text default '';
 
 create table if not exists ce_rent_payments (
   id text primary key,
