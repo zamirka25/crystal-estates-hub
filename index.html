@@ -1324,7 +1324,11 @@ async function startApp(){
       document.getElementById('setup-screen').classList.add('show');
       return;
     }
-    toast('⚠ Could not load data: '+err.message);
+    // Load failed (e.g. no internet). Do NOT continue to seeding — autoSeedIfEmpty would otherwise
+    // treat the empty in-memory list as an empty database and overwrite everyone's real data with blanks.
+    toast('⚠ Could not load data — check internet and reload');
+    document.getElementById('login-screen').classList.add('show');
+    return;
   }
   await autoSeedIfEmpty();
   subscribeRealtime();
