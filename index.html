@@ -105,6 +105,11 @@ td.num,th.num{text-align:right;}
 .unpaid-item:last-child{border-bottom:none;}
 .muted{color:var(--muted);font-size:12.5px;}
 .empty{color:var(--muted);font-size:14px;padding:14px 0;text-align:center;}
+.biz-let{border-left:4px solid var(--gold);}
+.biz-wash{border-left:4px solid var(--silver);}
+.t-good{color:var(--green);} .t-bad{color:var(--red);} .t-warn{color:var(--orange);} .t-gold{color:var(--gold-dark);}
+.ledger-net td{border-top:2px solid var(--line);font-weight:800;}
+.ledger-tot td{border-top:2px solid var(--gold);font-weight:800;background:var(--gold-soft);}
 
 /* Property section headers */
 .prop-head{display:flex;align-items:center;gap:8px;margin:18px 0 8px;}
@@ -177,7 +182,18 @@ td.num,th.num{text-align:right;}
     <button onclick="shiftMonth('dash',1)">›</button>
     <button class="today-link" onclick="goThisMonth('dash')">this month</button>
   </div>
-  <div class="cards" id="dash-cards"></div>
+  <p class="muted" style="margin:-4px 0 10px;">Whole group — letting &amp; car wash combined</p>
+  <div class="cards" id="dash-group"></div>
+  <div class="split">
+    <div class="panel biz-let">
+      <h3>🏠 Letting — Awali &amp; Iskan</h3>
+      <div id="dash-letting"></div>
+    </div>
+    <div class="panel biz-wash">
+      <h3>🚿 Crystal Gloss Car Wash</h3>
+      <div id="dash-carwash"></div>
+    </div>
+  </div>
   <div class="split">
     <div class="panel">
       <h3>Unpaid rent — <span id="dash-unpaid-month"></span></h3>
@@ -187,10 +203,6 @@ td.num,th.num{text-align:right;}
       <div class="panel">
         <h3>Buildings at a glance</h3>
         <div id="dash-props"></div>
-      </div>
-      <div class="panel">
-        <h3>Crystal Gloss — this month</h3>
-        <div id="dash-wash"></div>
       </div>
       <div class="panel">
         <h3>Company bills — <span id="dash-bills-month"></span></h3>
@@ -741,6 +753,24 @@ function washStats(mk){
   return { count:list.length, auto, man, total:auto+man };
 }
 function expenseTotal(mk){ return expenses.filter(x=>String(x.date).slice(0,7)===mk).reduce((s,x)=>s+amt(x.amount),0); }
+// Which sub-business an expense belongs to, from its property tag.
+function expenseBusiness(prop){ return prop==='Crystal Gloss' ? 'carwash' : (prop==='General' ? 'shared' : 'letting'); }
+function segmentExpenses(mk){
+  let letting=0, carwash=0, shared=0;
+  expenses.filter(x=>String(x.date).slice(0,7)===mk).forEach(x=>{
+    const a=amt(x.amount), b=expenseBusiness(x.property);
+    if (b==='carwash') carwash+=a; else if (b==='shared') shared+=a; else letting+=a;
+  });
+  return { letting, carwash, shared, total:letting+carwash+shared };
+}
+// Full month P&L split by business — the single source for the dashboard, final sheet and summary.
+function groupSheet(mk){
+  const st = monthStats(mk,'All'), ws = washStats(mk), seg = segmentExpenses(mk);
+  const letIncome = st.received, letExp = seg.letting, letNet = letIncome - letExp;
+  const washIncome = ws.total, washExp = seg.carwash, washNet = washIncome - washExp;
+  const income = letIncome + washIncome, exp = seg.total, net = income - exp;
+  return { st, ws, seg, letIncome, letExp, letNet, washIncome, washExp, washNet, shared:seg.shared, income, exp, net };
+}
 
 /* =================== Recurring bills logic =================== */
 function billExpense(billId, mk){ return expenses.find(x=>x.recurringId===billId && String(x.date).slice(0,7)===mk); }
@@ -778,15 +808,22 @@ function renderDashboard(){
   const mk = months.dash;
   document.getElementById('dash-mlabel').textContent = monthLabel(mk);
   document.getElementById('dash-unpaid-month').textContent = monthLabel(mk);
-  const st = monthStats(mk,'All'), ws = washStats(mk), ex = expenseTotal(mk);
-  const net = st.received + ws.total - ex;
-  document.getElementById('dash-cards').innerHTML = `
-    <div class="card"><div class="k">Rent expected</div><div class="v">${money0(st.expected)}</div><div class="s">${st.withRent} units with rent set</div></div>
-    <div class="card"><div class="k">Rent collected</div><div class="v good">${money0(st.collected)}</div><div class="s">${st.paidUnits} of ${st.withRent} units paid</div></div>
-    <div class="card"><div class="k">Outstanding</div><div class="v ${st.outstanding>0?'bad':'good'}">${money0(st.outstanding)}</div><div class="s">${st.withRent-st.paidUnits} unit(s) unpaid</div></div>
-    <div class="card"><div class="k">Crystal Gloss</div><div class="v gold">${money0(ws.total)}</div><div class="s">${ws.count} entries</div></div>
-    <div class="card"><div class="k">Expenses</div><div class="v warn">${money0(ex)}</div><div class="s">${monthLabelShort(mk)}</div></div>
-    <div class="card"><div class="k">Net position</div><div class="v ${net>=0?'good':'bad'}">${money0(net)}</div><div class="s">rent + car wash − expenses</div></div>`;
+  const g = groupSheet(mk), st = g.st, ws = g.ws;
+  document.getElementById('dash-group').innerHTML = `
+    <div class="card"><div class="k">Total income</div><div class="v good">${money0(g.income)}</div><div class="s">letting + car wash</div></div>
+    <div class="card"><div class="k">Total expenses</div><div class="v warn">${money0(g.exp)}</div><div class="s">all businesses${g.shared>0?' · incl. '+money0(g.shared)+' shared':''}</div></div>
+    <div class="card"><div class="k">Net profit</div><div class="v ${g.net>=0?'good':'bad'}">${money0(g.net)}</div><div class="s">income − expenses</div></div>`;
+  document.getElementById('dash-letting').innerHTML = `
+    <div class="unpaid-item"><span>Rent collected</span><b class="t-good">${money(g.letIncome)}</b></div>
+    <div class="unpaid-item"><span class="muted">of ${money(st.expected)} expected · ${st.paidUnits}/${st.withRent} paid</span><span class="muted">${st.outstanding>0?money(st.outstanding)+' outstanding':'all in 🎉'}</span></div>
+    <div class="unpaid-item"><span>Letting expenses</span><b class="t-warn">− ${money(g.letExp)}</b></div>
+    <div class="unpaid-item" style="border-top:2px solid var(--line);"><span><b>Letting net</b></span><b class="${g.letNet>=0?'t-good':'t-bad'}">${money(g.letNet)}</b></div>`;
+  document.getElementById('dash-carwash').innerHTML = `
+    <div class="unpaid-item"><span>Automatic</span><b>${money(ws.auto)}</b></div>
+    <div class="unpaid-item"><span>Manual</span><b>${money(ws.man)}</b></div>
+    <div class="unpaid-item"><span>Car wash income</span><b class="t-good">${money(g.washIncome)}</b></div>
+    <div class="unpaid-item"><span>Car wash expenses</span><b class="t-warn">− ${money(g.washExp)}</b></div>
+    <div class="unpaid-item" style="border-top:2px solid var(--line);"><span><b>Car wash net</b></span><b class="${g.washNet>=0?'t-good':'t-bad'}">${money(g.washNet)}</b></div>`;
 
   const unpaid = units.filter(u=>u.status!=='Vacant' && amt(u.monthlyRent)>0 && ['due','overdue','partial'].includes(unitRentStatus(u,mk)))
     .sort((a,b)=>a.property.localeCompare(b.property)||a.id.localeCompare(b.id));
@@ -801,11 +838,6 @@ function renderDashboard(){
     return `<div class="unpaid-item"><span><b>${p} Building</b><br><span class="muted">${s.occupied} occupied · ${s.vacant} vacant of ${s.total}</span></span>
       <span style="text-align:right;"><b>${money0(s.collected)}</b> <span class="muted">of ${money0(s.expected)}</span><br><span class="muted">${s.paidUnits}/${s.withRent} paid</span></span></div>`;
   }).join('');
-
-  document.getElementById('dash-wash').innerHTML = `
-    <div class="unpaid-item"><span>Automatic</span><b>${money(ws.auto)}</b></div>
-    <div class="unpaid-item"><span>Manual</span><b>${money(ws.man)}</b></div>
-    <div class="unpaid-item"><span><b>Total</b></span><b style="color:var(--gold-dark);">${money(ws.total)}</b></div>`;
 
   document.getElementById('dash-bills-month').textContent = monthLabelShort(mk);
   const activeBills = recurring.filter(b=>b.active!==false);
@@ -1104,11 +1136,12 @@ function renderExpenses(){
   renderBills();
   const list = expenses.filter(x=>String(x.date).slice(0,7)===mk).sort((a,b)=>b.date.localeCompare(a.date)||String(b.id).localeCompare(String(a.id)));
   const total = list.reduce((s,x)=>s+amt(x.amount),0);
-  const byProp = {};
-  list.forEach(x=>{ byProp[x.property]=(byProp[x.property]||0)+amt(x.amount); });
+  const seg = segmentExpenses(mk);
   document.getElementById('exp-cards').innerHTML =
-    `<div class="card"><div class="k">Total expenses</div><div class="v warn">${money(total)}</div><div class="s">${list.length} entries</div></div>`
-    + Object.keys(byProp).map(p=>`<div class="card"><div class="k">${esc(p)}</div><div class="v">${money(byProp[p])}</div></div>`).join('');
+    `<div class="card"><div class="k">Total expenses</div><div class="v warn">${money(total)}</div><div class="s">${list.length} entries</div></div>
+     <div class="card"><div class="k">🏠 Letting</div><div class="v">${money(seg.letting)}</div><div class="s">Awali + Iskan</div></div>
+     <div class="card"><div class="k">🚿 Car wash</div><div class="v">${money(seg.carwash)}</div><div class="s">Crystal Gloss</div></div>`
+    + (seg.shared>0?`<div class="card"><div class="k">Shared / general</div><div class="v">${money(seg.shared)}</div></div>`:'');
   document.getElementById('exp-body').innerHTML = list.map(x=>`
     <tr><td>${fmtDate(x.date)}</td><td>${esc(x.property)}</td><td>${esc(x.category)}</td><td>${esc(x.description)}</td>
     <td class="num"><b>${money(amt(x.amount))}</b></td>
@@ -1284,8 +1317,10 @@ function renderReports(){
   document.getElementById('rep-mlabel').textContent = monthLabel(mk);
   const all = monthStats(mk,'All'), aw = monthStats(mk,'Awali'), is = monthStats(mk,'Iskan');
   const ws = washStats(mk), ex = expenseTotal(mk);
+  const g = groupSheet(mk);
   const net = all.received + ws.total - ex;
   const rate = all.expected>0 ? Math.round(all.collected/all.expected*100) : 0;
+  const nc = v => 'color:'+(v>=0?'var(--green)':'var(--red)')+';';   // net colour
 
   const expList = expenses.filter(x=>String(x.date).slice(0,7)===mk);
   const byCat = {};
@@ -1310,6 +1345,19 @@ function renderReports(){
     <div class="panel" style="text-align:center;">
       <h3 style="font-size:18px;">Crystal Estates — Management Report</h3>
       <p class="muted">${monthLabel(mk)} · generated ${new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}</p>
+    </div>
+    <div class="panel">
+      <h3>Final sheet — all businesses</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Business</th><th class="num">Income</th><th class="num">Expenses</th><th class="num">Net profit</th></tr></thead>
+        <tbody>
+          <tr><td>🏠 Letting <span class="muted">(Awali + Iskan)</span></td><td class="num">${money(g.letIncome)}</td><td class="num">${money(g.letExp)}</td><td class="num" style="${nc(g.letNet)}">${money(g.letNet)}</td></tr>
+          <tr><td>🚿 Crystal Gloss <span class="muted">(car wash)</span></td><td class="num">${money(g.washIncome)}</td><td class="num">${money(g.washExp)}</td><td class="num" style="${nc(g.washNet)}">${money(g.washNet)}</td></tr>
+          ${g.shared>0?`<tr><td>Shared / general</td><td class="num">—</td><td class="num">${money(g.shared)}</td><td class="num" style="${nc(-g.shared)}">− ${money(g.shared)}</td></tr>`:''}
+          <tr class="ledger-tot"><td>Whole group</td><td class="num">${money(g.income)}</td><td class="num">${money(g.exp)}</td><td class="num" style="${nc(g.net)}">${money(g.net)}</td></tr>
+        </tbody>
+      </table></div>
+      <p class="muted" style="margin-top:8px;">Income = rent received + car wash takings. Each business is charged only its own expenses (by the property tag on each expense); “Shared / general” costs are counted at group level.</p>
     </div>
     <div class="cards">
       <div class="card"><div class="k">Total income</div><div class="v good">${money0(all.received+ws.total)}</div><div class="s">rent + car wash</div></div>
@@ -1366,16 +1414,24 @@ function exportCSV(){
 }
 function copySummary(){
   const mk = months.rep;
-  const all = monthStats(mk,'All'), aw = monthStats(mk,'Awali'), is = monthStats(mk,'Iskan');
-  const ws = washStats(mk), ex = expenseTotal(mk);
+  const g = groupSheet(mk), st = g.st;
+  const rate = st.expected>0 ? Math.round(st.collected/st.expected*100) : 0;
   const unpaid = units.filter(u=>u.status!=='Vacant' && amt(u.monthlyRent)>0 && ['due','overdue','partial'].includes(unitRentStatus(u,mk)));
   const text = `*Crystal Estates — ${monthLabel(mk)}*
-Rent collected: ${money0(all.collected)} of ${money0(all.expected)} (${all.expected>0?Math.round(all.collected/all.expected*100):0}%)
-• Awali: ${aw.paidUnits}/${aw.withRent} units paid (${money0(aw.collected)})
-• Iskan: ${is.paidUnits}/${is.withRent} units paid (${money0(is.collected)})
-Crystal Gloss: ${money0(ws.total)} (auto ${money0(ws.auto)} / manual ${money0(ws.man)})
-Expenses: ${money0(ex)}
-*Net: ${money0(all.received+ws.total-ex)}*
+
+🏠 LETTING (Awali + Iskan)
+Rent: ${money0(g.letIncome)} of ${money0(st.expected)} (${rate}%)
+Expenses: ${money0(g.letExp)}
+Net: ${money0(g.letNet)}
+
+🚿 CRYSTAL GLOSS CAR WASH
+Income: ${money0(g.washIncome)} (auto ${money0(g.ws.auto)} / manual ${money0(g.ws.man)})
+Expenses: ${money0(g.washExp)}
+Net: ${money0(g.washNet)}
+${g.shared>0?'\nShared/general expenses: '+money0(g.shared)+'\n':''}
+*GROUP TOTAL*
+Income ${money0(g.income)} − Expenses ${money0(g.exp)}
+*Net profit: ${money0(g.net)}*
 Unpaid units: ${unpaid.length?unpaid.map(u=>u.property+' '+u.unitNo).join(', '):'none 🎉'}`;
   (navigator.clipboard&&navigator.clipboard.writeText ? navigator.clipboard.writeText(text) : Promise.reject()).then(
     ()=>toast('Summary copied — paste into WhatsApp'),
