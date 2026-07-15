@@ -187,29 +187,27 @@ td.num,th.num{text-align:right;}
   <div class="cards" id="dash-group"></div>
   <div class="split">
     <div class="panel biz-let">
-      <h3>🏠 Letting — Awali &amp; Iskan</h3>
-      <div id="dash-letting"></div>
+      <h3>🏠 Awali Building</h3>
+      <div id="dash-awali"></div>
     </div>
+    <div class="panel biz-let">
+      <h3>🏠 Iskan Building</h3>
+      <div id="dash-iskan"></div>
+    </div>
+  </div>
+  <div class="split">
     <div class="panel biz-wash">
       <h3>🚿 Crystal Gloss Car Wash</h3>
       <div id="dash-carwash"></div>
     </div>
-  </div>
-  <div class="split">
     <div class="panel">
-      <h3>Unpaid rent — <span id="dash-unpaid-month"></span></h3>
-      <div id="dash-unpaid"></div>
+      <h3>Company bills — <span id="dash-bills-month"></span></h3>
+      <div id="dash-bills"></div>
     </div>
-    <div>
-      <div class="panel">
-        <h3>Buildings at a glance</h3>
-        <div id="dash-props"></div>
-      </div>
-      <div class="panel">
-        <h3>Company bills — <span id="dash-bills-month"></span></h3>
-        <div id="dash-bills"></div>
-      </div>
-    </div>
+  </div>
+  <div class="panel">
+    <h3>Unpaid rent — <span id="dash-unpaid-month"></span></h3>
+    <div id="dash-unpaid"></div>
   </div>
 </section>
 
@@ -766,6 +764,7 @@ function washStats(mk){
 function expenseTotal(mk){ return expenses.filter(x=>String(x.date).slice(0,7)===mk).reduce((s,x)=>s+amt(x.amount),0); }
 // Which sub-business an expense belongs to, from its property tag.
 function expenseBusiness(prop){ return prop==='Crystal Gloss' ? 'carwash' : (prop==='General' ? 'shared' : 'letting'); }
+function propExpenses(mk, prop){ return expenses.filter(x=>String(x.date).slice(0,7)===mk && x.property===prop).reduce((s,x)=>s+amt(x.amount),0); }
 function segmentExpenses(mk){
   let letting=0, carwash=0, shared=0;
   expenses.filter(x=>String(x.date).slice(0,7)===mk).forEach(x=>{
@@ -826,11 +825,17 @@ function renderDashboard(){
     <div class="card"><div class="k">Total income</div><div class="v good">${money0(g.income)}</div><div class="s">letting + car wash</div></div>
     <div class="card"><div class="k">Total expenses</div><div class="v warn">${money0(g.exp)}</div><div class="s">all businesses${g.shared>0?' · incl. '+money0(g.shared)+' shared':''}</div></div>
     <div class="card"><div class="k">Net profit</div><div class="v ${g.net>=0?'good':'bad'}">${money0(g.net)}</div><div class="s">income − expenses</div></div>`;
-  document.getElementById('dash-letting').innerHTML = `
-    <div class="unpaid-item"><span>Rent collected</span><b class="t-good">${money(g.letIncome)}</b></div>
-    <div class="unpaid-item"><span class="muted">of ${money(st.expected)} expected · ${st.paidUnits}/${st.withRent} paid</span><span class="muted">${st.outstanding>0?money(st.outstanding)+' outstanding':'all in 🎉'}</span></div>
-    <div class="unpaid-item"><span>Letting expenses</span><b class="t-warn">− ${money(g.letExp)}</b></div>
-    <div class="unpaid-item" style="border-top:2px solid var(--line);"><span><b>Letting net</b></span><b class="${g.letNet>=0?'t-good':'t-bad'}">${money(g.letNet)}</b></div>`;
+  const bp = (prop) => {
+    const s = monthStats(mk, prop), exp = propExpenses(mk, prop), net = s.received - exp;
+    return `
+    <div class="unpaid-item"><span class="muted">${s.occupied} occupied${s.reserved?' · '+s.reserved+' reserved':''} · ${s.vacant} vacant of ${s.total}</span><span></span></div>
+    <div class="unpaid-item"><span>Rent collected</span><b class="t-good">${money(s.received)}</b></div>
+    <div class="unpaid-item"><span class="muted">of ${money(s.expected)} · ${s.paidUnits}/${s.withRent} paid</span><span class="muted">${s.outstanding>0?money(s.outstanding)+' outstanding':'all in 🎉'}</span></div>
+    <div class="unpaid-item"><span>Expenses</span><b class="t-warn">− ${money(exp)}</b></div>
+    <div class="unpaid-item" style="border-top:2px solid var(--line);"><span><b>Building net</b></span><b class="${net>=0?'t-good':'t-bad'}">${money(net)}</b></div>`;
+  };
+  document.getElementById('dash-awali').innerHTML = bp('Awali');
+  document.getElementById('dash-iskan').innerHTML = bp('Iskan');
   document.getElementById('dash-carwash').innerHTML = `
     <div class="unpaid-item"><span>Automatic</span><b>${money(ws.auto)}</b></div>
     <div class="unpaid-item"><span>Manual</span><b>${money(ws.man)}</b></div>
@@ -845,12 +850,6 @@ function renderDashboard(){
     return `<div class="unpaid-item"><span><b>${esc(u.property)} · ${esc(u.unitNo)}</b><br><span class="muted">${esc(u.tenant)||'—'}</span></span>
       <span style="text-align:right;">${STATUS_CHIP[s]}<br><span class="muted">${money(left)} left</span></span></div>`;
   }).join('') : '<div class="empty">🎉 Nothing outstanding — all rent in for this month.</div>';
-
-  document.getElementById('dash-props').innerHTML = ['Awali','Iskan'].map(p=>{
-    const s = monthStats(mk,p);
-    return `<div class="unpaid-item"><span><b>${p} Building</b><br><span class="muted">${s.occupied} occupied${s.reserved?' · '+s.reserved+' reserved':''} · ${s.vacant} vacant of ${s.total}</span></span>
-      <span style="text-align:right;"><b>${money0(s.collected)}</b> <span class="muted">of ${money0(s.expected)}</span><br><span class="muted">${s.paidUnits}/${s.withRent} paid</span></span></div>`;
-  }).join('');
 
   document.getElementById('dash-bills-month').textContent = monthLabelShort(mk);
   const activeBills = recurring.filter(b=>b.active!==false);
@@ -1339,6 +1338,7 @@ function renderReports(){
   const all = monthStats(mk,'All'), aw = monthStats(mk,'Awali'), is = monthStats(mk,'Iskan');
   const ws = washStats(mk), ex = expenseTotal(mk);
   const g = groupSheet(mk);
+  const awExp = propExpenses(mk,'Awali'), isExp = propExpenses(mk,'Iskan');
   const net = all.received + ws.total - ex;
   const rate = all.expected>0 ? Math.round(all.collected/all.expected*100) : 0;
   const nc = v => 'color:'+(v>=0?'var(--green)':'var(--red)')+';';   // net colour
@@ -1372,7 +1372,8 @@ function renderReports(){
       <div class="tbl-wrap"><table>
         <thead><tr><th>Business</th><th class="num">Income</th><th class="num">Expenses</th><th class="num">Net profit</th></tr></thead>
         <tbody>
-          <tr><td>🏠 Letting <span class="muted">(Awali + Iskan)</span></td><td class="num">${money(g.letIncome)}</td><td class="num">${money(g.letExp)}</td><td class="num" style="${nc(g.letNet)}">${money(g.letNet)}</td></tr>
+          <tr><td>🏠 Awali Building</td><td class="num">${money(aw.received)}</td><td class="num">${money(awExp)}</td><td class="num" style="${nc(aw.received-awExp)}">${money(aw.received-awExp)}</td></tr>
+          <tr><td>🏠 Iskan Building</td><td class="num">${money(is.received)}</td><td class="num">${money(isExp)}</td><td class="num" style="${nc(is.received-isExp)}">${money(is.received-isExp)}</td></tr>
           <tr><td>🚿 Crystal Gloss <span class="muted">(car wash)</span></td><td class="num">${money(g.washIncome)}</td><td class="num">${money(g.washExp)}</td><td class="num" style="${nc(g.washNet)}">${money(g.washNet)}</td></tr>
           ${g.shared>0?`<tr><td>Shared / general</td><td class="num">—</td><td class="num">${money(g.shared)}</td><td class="num" style="${nc(-g.shared)}">− ${money(g.shared)}</td></tr>`:''}
           <tr class="ledger-tot"><td>Whole group</td><td class="num">${money(g.income)}</td><td class="num">${money(g.exp)}</td><td class="num" style="${nc(g.net)}">${money(g.net)}</td></tr>
