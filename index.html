@@ -719,12 +719,20 @@ function monthStats(mk, prop){
   const list = units.filter(u=>(!prop||prop==='All'||u.property===prop));
   const occ = list.filter(u=>u.status!=='Vacant');
   const withRent = occ.filter(u=>amt(u.monthlyRent)>0);
-  const expected = withRent.reduce((s,u)=>s+amt(u.monthlyRent),0);
+  // Reconcile PER UNIT so the totals always add up: expected = collected + outstanding.
+  // "collected" is capped at each unit's own rent (over-payments / stray payments can't distort it);
+  // "received" is the actual cash in (used for income / net position).
+  let expected = 0, collected = 0, paidUnits = 0;
+  withRent.forEach(u=>{
+    const rent = amt(u.monthlyRent), paid = paidAmount(u.id, mk);
+    expected += rent;
+    collected += Math.min(paid, rent);
+    if (paid >= rent) paidUnits++;
+  });
   const unitIds = new Set(list.map(u=>u.id));
-  const collected = rents.filter(p=>p.monthFor===mk && unitIds.has(p.unitId)).reduce((s,p)=>s+amt(p.amount),0);
-  const paidUnits = withRent.filter(u=>paidAmount(u.id,mk)>=amt(u.monthlyRent)).length;
+  const received = rents.filter(p=>p.monthFor===mk && unitIds.has(p.unitId)).reduce((s,p)=>s+amt(p.amount),0);
   return { total:list.length, occupied:occ.length, vacant:list.length-occ.length, withRent:withRent.length,
-           expected, collected, outstanding:Math.max(0,expected-collected), paidUnits };
+           expected, collected, received, outstanding: expected - collected, paidUnits };
 }
 function washStats(mk){
   const list = washes.filter(w=>String(w.date).slice(0,7)===mk);
@@ -771,7 +779,7 @@ function renderDashboard(){
   document.getElementById('dash-mlabel').textContent = monthLabel(mk);
   document.getElementById('dash-unpaid-month').textContent = monthLabel(mk);
   const st = monthStats(mk,'All'), ws = washStats(mk), ex = expenseTotal(mk);
-  const net = st.collected + ws.total - ex;
+  const net = st.received + ws.total - ex;
   document.getElementById('dash-cards').innerHTML = `
     <div class="card"><div class="k">Rent expected</div><div class="v">${money0(st.expected)}</div><div class="s">${st.withRent} units with rent set</div></div>
     <div class="card"><div class="k">Rent collected</div><div class="v good">${money0(st.collected)}</div><div class="s">${st.paidUnits} of ${st.withRent} units paid</div></div>
@@ -1276,7 +1284,7 @@ function renderReports(){
   document.getElementById('rep-mlabel').textContent = monthLabel(mk);
   const all = monthStats(mk,'All'), aw = monthStats(mk,'Awali'), is = monthStats(mk,'Iskan');
   const ws = washStats(mk), ex = expenseTotal(mk);
-  const net = all.collected + ws.total - ex;
+  const net = all.received + ws.total - ex;
   const rate = all.expected>0 ? Math.round(all.collected/all.expected*100) : 0;
 
   const expList = expenses.filter(x=>String(x.date).slice(0,7)===mk);
@@ -1290,10 +1298,10 @@ function renderReports(){
   for (let i=11;i>=0;i--){
     const k = shiftMonthKey(mk,-i);
     const s = monthStats(k,'All'), w = washStats(k), e2 = expenseTotal(k);
-    const n = s.collected+w.total-e2;
-    if (s.collected===0 && w.total===0 && e2===0 && i>0 && k!==mk) continue;
+    const n = s.received+w.total-e2;
+    if (s.received===0 && w.total===0 && e2===0 && i>0 && k!==mk) continue;
     trendRows += `<tr${k===mk?' style="background:var(--gold-soft);font-weight:700;"':''}><td>${monthLabelShort(k)}</td>
-      <td class="num">${money0(s.collected)}</td><td class="num">${money0(w.total)}</td>
+      <td class="num">${money0(s.received)}</td><td class="num">${money0(w.total)}</td>
       <td class="num">${money0(e2)}</td><td class="num" style="color:${n>=0?'var(--green)':'var(--red)'};">${money0(n)}</td></tr>`;
   }
 
@@ -1304,7 +1312,7 @@ function renderReports(){
       <p class="muted">${monthLabel(mk)} · generated ${new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}</p>
     </div>
     <div class="cards">
-      <div class="card"><div class="k">Total income</div><div class="v good">${money0(all.collected+ws.total)}</div><div class="s">rent + car wash</div></div>
+      <div class="card"><div class="k">Total income</div><div class="v good">${money0(all.received+ws.total)}</div><div class="s">rent + car wash</div></div>
       <div class="card"><div class="k">Rent collection</div><div class="v gold">${rate}%</div><div class="s">${money0(all.collected)} of ${money0(all.expected)}</div></div>
       <div class="card"><div class="k">Expenses</div><div class="v warn">${money0(ex)}</div></div>
       <div class="card"><div class="k">Net</div><div class="v ${net>=0?'good':'bad'}">${money0(net)}</div></div>
@@ -1367,7 +1375,7 @@ Rent collected: ${money0(all.collected)} of ${money0(all.expected)} (${all.expec
 • Iskan: ${is.paidUnits}/${is.withRent} units paid (${money0(is.collected)})
 Crystal Gloss: ${money0(ws.total)} (auto ${money0(ws.auto)} / manual ${money0(ws.man)})
 Expenses: ${money0(ex)}
-*Net: ${money0(all.collected+ws.total-ex)}*
+*Net: ${money0(all.received+ws.total-ex)}*
 Unpaid units: ${unpaid.length?unpaid.map(u=>u.property+' '+u.unitNo).join(', '):'none 🎉'}`;
   (navigator.clipboard&&navigator.clipboard.writeText ? navigator.clipboard.writeText(text) : Promise.reject()).then(
     ()=>toast('Summary copied — paste into WhatsApp'),
