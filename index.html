@@ -78,6 +78,7 @@ td.num,th.num{text-align:right;}
 .chip.vacant{background:var(--silver-soft);color:var(--silver);}
 .chip.partial{background:var(--gold-soft);color:var(--gold-dark);}
 .chip.norent{background:var(--silver-soft);color:var(--silver);}
+.chip.reserved{background:#e8eefb;color:#3b57b0;}
 
 /* Filters */
 .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;}
@@ -261,6 +262,12 @@ td.num,th.num{text-align:right;}
     <span style="flex:1"></span>
     <button class="btn btn-primary btn-sm" onclick="openUnitModal()">+ Add unit</button>
   </div>
+  <div class="filters no-print">
+    <button class="fchip active" data-ustatus="All" onclick="setUnitStatus('All')">All</button>
+    <button class="fchip" data-ustatus="Occupied" onclick="setUnitStatus('Occupied')">Occupied</button>
+    <button class="fchip" data-ustatus="Reserved" onclick="setUnitStatus('Reserved')">Reserved</button>
+    <button class="fchip" data-ustatus="Vacant" onclick="setUnitStatus('Vacant')">Not occupied</button>
+  </div>
   <div id="units-list"></div>
 </section>
 
@@ -406,7 +413,7 @@ td.num,th.num{text-align:right;}
       <div class="form-group"><label>Unit name / number</label><input type="text" id="u-no" required placeholder="e.g. Room 5, Flat 12, Shop"></div>
       <div class="form-group">
         <label>Occupancy status</label>
-        <select id="u-status" onchange="onUnitStatusChange()"><option value="Occupied">Occupied</option><option value="Vacant">Not occupied (vacant)</option></select>
+        <select id="u-status" onchange="onUnitStatusChange()"><option value="Occupied">Occupied</option><option value="Reserved">Reserved</option><option value="Vacant">Not occupied (vacant)</option></select>
       </div>
       <div class="form-row">
         <div><label>Tenant name</label><input type="text" id="u-tenant" placeholder="Full name"></div>
@@ -547,7 +554,7 @@ td.num,th.num{text-align:right;}
 let units = [], rents = [], washes = [], expenses = [], recurring = [], invoices = [], settings = { currency: 'SAR' };
 let invUnitId = null, invMonth = null;
 let months = {};                       // per-tab selected month, YYYY-MM
-let rentProp = 'All', unitProp = 'All';
+let rentProp = 'All', unitProp = 'All', unitStatus = 'All';
 let editingUnitId = null, payingUnitId = null, editingBillId = null, payingBillId = null, calSelectedDay = '', newUnitDraftId = null;
 const LS = { units:'cex-units', rents:'cex-rents', washes:'cex-washes', expenses:'cex-expenses', recurring:'cex-recurring', invoices:'cex-invoices', settings:'cex-settings' };
 
@@ -710,6 +717,7 @@ function paymentsFor(unitId, mk){ return rents.filter(p=>p.unitId===unitId && p.
 function paidAmount(unitId, mk){ return paymentsFor(unitId,mk).reduce((s,p)=>s+amt(p.amount),0); }
 function unitRentStatus(u, mk){
   if (u.status==='Vacant') return 'vacant';
+  if (u.status==='Reserved') return 'reserved';
   const rent = amt(u.monthlyRent), paid = paidAmount(u.id,mk);
   if (rent<=0) return paid>0 ? 'paid' : 'norent';
   if (paid>=rent) return 'paid';
@@ -725,12 +733,15 @@ function unitRentStatus(u, mk){
 const STATUS_CHIP = {
   paid:'<span class="chip paid">Paid</span>', partial:'<span class="chip partial">Part-paid</span>',
   due:'<span class="chip due">Not paid</span>', overdue:'<span class="chip overdue">Not paid (late)</span>',
-  vacant:'<span class="chip vacant">Vacant</span>', norent:'<span class="chip norent">Rent not set</span>'
+  vacant:'<span class="chip vacant">Vacant</span>', norent:'<span class="chip norent">Rent not set</span>',
+  reserved:'<span class="chip reserved">Reserved</span>'
 };
 function monthStats(mk, prop){
   const list = units.filter(u=>(!prop||prop==='All'||u.property===prop));
-  const occ = list.filter(u=>u.status!=='Vacant');
-  const withRent = occ.filter(u=>amt(u.monthlyRent)>0);
+  const occupied = list.filter(u=>u.status==='Occupied');
+  const reserved = list.filter(u=>u.status==='Reserved');
+  const vacant = list.filter(u=>u.status!=='Occupied' && u.status!=='Reserved');
+  const withRent = occupied.filter(u=>amt(u.monthlyRent)>0);   // only OCCUPIED units are due rent (Reserved is held, not yet renting)
   // Reconcile PER UNIT so the totals always add up: expected = collected + outstanding.
   // "collected" is capped at each unit's own rent (over-payments / stray payments can't distort it);
   // "received" is the actual cash in (used for income / net position).
@@ -743,7 +754,7 @@ function monthStats(mk, prop){
   });
   const unitIds = new Set(list.map(u=>u.id));
   const received = rents.filter(p=>p.monthFor===mk && unitIds.has(p.unitId)).reduce((s,p)=>s+amt(p.amount),0);
-  return { total:list.length, occupied:occ.length, vacant:list.length-occ.length, withRent:withRent.length,
+  return { total:list.length, occupied:occupied.length, reserved:reserved.length, vacant:vacant.length, withRent:withRent.length,
            expected, collected, received, outstanding: expected - collected, paidUnits };
 }
 function washStats(mk){
@@ -802,6 +813,8 @@ function shiftMonth(tab,delta){ months[tab]=shiftMonthKey(months[tab],delta); re
 function goThisMonth(tab){ months[tab]=currentMonthKey(); refreshAll(); }
 function setRentProp(p){ rentProp=p; document.querySelectorAll('[data-prop]').forEach(b=>b.classList.toggle('active',b.dataset.prop===p)); renderRent(); }
 function setUnitProp(p){ unitProp=p; document.querySelectorAll('[data-uprop]').forEach(b=>b.classList.toggle('active',b.dataset.uprop===p)); renderUnits(); }
+function setUnitStatus(s){ unitStatus=s; document.querySelectorAll('[data-ustatus]').forEach(b=>b.classList.toggle('active',b.dataset.ustatus===s)); renderUnits(); }
+function matchStatus(u){ return unitStatus==='All' || (unitStatus==='Vacant' ? (u.status!=='Occupied'&&u.status!=='Reserved') : u.status===unitStatus); }
 
 /* =================== Dashboard =================== */
 function renderDashboard(){
@@ -825,7 +838,7 @@ function renderDashboard(){
     <div class="unpaid-item"><span>Car wash expenses</span><b class="t-warn">− ${money(g.washExp)}</b></div>
     <div class="unpaid-item" style="border-top:2px solid var(--line);"><span><b>Car wash net</b></span><b class="${g.washNet>=0?'t-good':'t-bad'}">${money(g.washNet)}</b></div>`;
 
-  const unpaid = units.filter(u=>u.status!=='Vacant' && amt(u.monthlyRent)>0 && ['due','overdue','partial'].includes(unitRentStatus(u,mk)))
+  const unpaid = units.filter(u=>u.status==='Occupied' && amt(u.monthlyRent)>0 && ['due','overdue','partial'].includes(unitRentStatus(u,mk)))
     .sort((a,b)=>a.property.localeCompare(b.property)||a.id.localeCompare(b.id));
   document.getElementById('dash-unpaid').innerHTML = unpaid.length ? unpaid.map(u=>{
     const s = unitRentStatus(u,mk), left = amt(u.monthlyRent)-paidAmount(u.id,mk);
@@ -835,7 +848,7 @@ function renderDashboard(){
 
   document.getElementById('dash-props').innerHTML = ['Awali','Iskan'].map(p=>{
     const s = monthStats(mk,p);
-    return `<div class="unpaid-item"><span><b>${p} Building</b><br><span class="muted">${s.occupied} occupied · ${s.vacant} vacant of ${s.total}</span></span>
+    return `<div class="unpaid-item"><span><b>${p} Building</b><br><span class="muted">${s.occupied} occupied${s.reserved?' · '+s.reserved+' reserved':''} · ${s.vacant} vacant of ${s.total}</span></span>
       <span style="text-align:right;"><b>${money0(s.collected)}</b> <span class="muted">of ${money0(s.expected)}</span><br><span class="muted">${s.paidUnits}/${s.withRent} paid</span></span></div>`;
   }).join('');
 
@@ -866,7 +879,7 @@ function renderRent(){
   document.getElementById('rent-body').innerHTML = list.map(u=>{
     const s = unitRentStatus(u,mk), paid = paidAmount(u.id,mk), pays = paymentsFor(u.id,mk);
     let action = '';
-    if (u.status!=='Vacant'){
+    if (u.status==='Occupied'){   // only occupied units are due monthly rent
       if (s==='paid') action = `<button class="btn btn-ghost btn-sm" onclick="undoPayment('${u.id}')" title="Mark as not paid (removes this month's payment)">Mark not paid</button>`;
       else action = `<button class="btn btn-primary btn-sm" onclick="openPayModal('${u.id}')">Mark paid</button>`;
     }
@@ -918,11 +931,18 @@ function undoPayment(unitId){
 function renderUnits(){
   const q = (document.getElementById('unit-search').value||'').toLowerCase();
   const props = unitProp==='All' ? ['Awali','Iskan'] : [unitProp];
-  document.getElementById('units-list').innerHTML = props.map(p=>{
-    const list = units.filter(u=>u.property===p)
-      .filter(u=>!q || (u.unitNo+' '+u.tenant+' '+u.phone).toLowerCase().includes(q))
+  const statusChip = u => u.status==='Reserved' ? '<span class="chip reserved">Reserved</span>'
+    : (u.status==='Vacant' ? '<span class="chip vacant">Not occupied</span>' : '<span class="chip paid">Occupied</span>');
+  const blocks = props.map(p=>{
+    const all = units.filter(u=>u.property===p);
+    const list = all
+      .filter(u=>!q || (u.unitNo+' '+u.tenant+' '+u.phone+' '+u.tenantId).toLowerCase().includes(q))
+      .filter(matchStatus)
       .sort((a,b)=>String(a.id).localeCompare(String(b.id),undefined,{numeric:true}));
-    const occ = units.filter(u=>u.property===p&&u.status!=='Vacant').length;
+    if (!list.length && (unitStatus!=='All' || q)) return '';   // hide empty buildings when filtering
+    const occN = all.filter(u=>u.status==='Occupied').length;
+    const resN = all.filter(u=>u.status==='Reserved').length;
+    const vacN = all.length - occN - resN;
     const rows = list.map(u=>{
       const since = u.startDate ? '<br><span class="muted">moved in '+new Date(u.startDate+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'</span>' : '';
       const notes = u.notes ? '<br><span class="muted">'+esc(u.notes)+'</span>' : '';
@@ -930,14 +950,15 @@ function renderUnits(){
       <td><b>${esc(u.unitNo)}</b> <span class="muted">${esc(u.type)}</span>${notes}</td>
       <td>${esc(u.tenant)||'<span class="muted">— no tenant —</span>'}${u.phone?'<br><span class="muted">'+esc(u.phone)+'</span>':''}${u.tenantId?'<br><span class="muted">ID '+esc(u.tenantId)+'</span>':''}${since}</td>
       <td class="num">${amt(u.monthlyRent)>0?money(amt(u.monthlyRent)):'<span class="muted">not set</span>'}<br><span class="muted">due day ${esc(u.dueDay)}</span></td>
-      <td>${u.status==='Vacant'?'<span class="chip vacant">Not occupied</span>':'<span class="chip paid">Occupied</span>'}</td>
+      <td>${statusChip(u)}</td>
       <td class="no-print" style="text-align:right;"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openUnitModal('${u.id}')">✎ Edit</button></td></tr>`;
     }).join('');
-    return `<div class="prop-head"><h4>${p} Building</h4><span class="muted">${occ} occupied of ${units.filter(u=>u.property===p).length}</span></div>
+    return `<div class="prop-head"><h4>${p} Building</h4><span class="muted">${occN} occupied${resN?' · '+resN+' reserved':''} · ${vacN} vacant of ${all.length}</span></div>
       <div class="panel tbl-wrap"><table>
         <thead><tr><th>Unit</th><th>Tenant</th><th class="num">Rent</th><th>Status</th><th class="no-print"></th></tr></thead>
         <tbody>${rows||'<tr><td colspan="5" class="empty">No units.</td></tr>'}</tbody></table></div>`;
-  }).join('');
+  }).filter(Boolean);
+  document.getElementById('units-list').innerHTML = blocks.join('') || '<div class="panel"><div class="empty">No units match this filter.</div></div>';
 }
 function onUnitStatusChange(){
   // When a unit is marked not-occupied, grey out the tenant fields as a hint (values are kept)
@@ -1259,7 +1280,7 @@ function renderCalendar(){
     const dateStr = mk+'-'+String(d).padStart(2,'0');
     let badges = '';
     // rent due on this day
-    const dueUnits = units.filter(u=>u.status!=='Vacant' && amt(u.monthlyRent)>0 && Math.min(+u.dueDay||1,28)===d);
+    const dueUnits = units.filter(u=>u.status==='Occupied' && amt(u.monthlyRent)>0 && Math.min(+u.dueDay||1,28)===d);
     if (dueUnits.length){
       const unpaid = dueUnits.filter(u=>paidAmount(u.id,mk)<amt(u.monthlyRent)).length;
       const cls = unpaid===0 ? 'paid' : (dateStr<today ? 'overdue' : 'due');
@@ -1288,7 +1309,7 @@ function showCalDay(dateStr){ calSelectedDay = dateStr; renderCalendar(); render
 function renderCalDayDetail(dateStr){
   const mk = dateStr.slice(0,7), d = +dateStr.slice(8,10);
   const rows = [];
-  units.filter(u=>u.status!=='Vacant' && amt(u.monthlyRent)>0 && Math.min(+u.dueDay||1,28)===d).forEach(u=>{
+  units.filter(u=>u.status==='Occupied' && amt(u.monthlyRent)>0 && Math.min(+u.dueDay||1,28)===d).forEach(u=>{
     const s = unitRentStatus(u,mk);
     rows.push(`<div class="unpaid-item"><span>🏠 Rent due — <b>${esc(u.property)} · ${esc(u.unitNo)}</b> <span class="muted">${esc(u.tenant)}</span></span><span>${STATUS_CHIP[s]} <b>${money(amt(u.monthlyRent))}</b></span></div>`);
   });
@@ -1340,7 +1361,7 @@ function renderReports(){
       <td class="num">${money0(e2)}</td><td class="num" style="color:${n>=0?'var(--green)':'var(--red)'};">${money0(n)}</td></tr>`;
   }
 
-  const unpaid = units.filter(u=>u.status!=='Vacant' && amt(u.monthlyRent)>0 && ['due','overdue','partial'].includes(unitRentStatus(u,mk)));
+  const unpaid = units.filter(u=>u.status==='Occupied' && amt(u.monthlyRent)>0 && ['due','overdue','partial'].includes(unitRentStatus(u,mk)));
   document.getElementById('report-content').innerHTML = `
     <div class="panel" style="text-align:center;">
       <h3 style="font-size:18px;">Crystal Estates — Management Report</h3>
@@ -1416,7 +1437,7 @@ function copySummary(){
   const mk = months.rep;
   const g = groupSheet(mk), st = g.st;
   const rate = st.expected>0 ? Math.round(st.collected/st.expected*100) : 0;
-  const unpaid = units.filter(u=>u.status!=='Vacant' && amt(u.monthlyRent)>0 && ['due','overdue','partial'].includes(unitRentStatus(u,mk)));
+  const unpaid = units.filter(u=>u.status==='Occupied' && amt(u.monthlyRent)>0 && ['due','overdue','partial'].includes(unitRentStatus(u,mk)));
   const text = `*Crystal Estates — ${monthLabel(mk)}*
 
 🏠 LETTING (Awali + Iskan)
