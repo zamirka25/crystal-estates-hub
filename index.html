@@ -821,9 +821,14 @@ function renderDashboard(){
   document.getElementById('dash-mlabel').textContent = monthLabel(mk);
   document.getElementById('dash-unpaid-month').textContent = monthLabel(mk);
   const g = groupSheet(mk), st = g.st, ws = g.ws;
+  // Show exactly what each total is made of, so every riyal is traceable on screen.
+  const awS = monthStats(mk,'Awali'), isS = monthStats(mk,'Iskan');
+  const awE = propExpenses(mk,'Awali'), isE = propExpenses(mk,'Iskan');
   document.getElementById('dash-group').innerHTML = `
-    <div class="card"><div class="k">Total income</div><div class="v good">${money0(g.income)}</div><div class="s">letting + car wash</div></div>
-    <div class="card"><div class="k">Total expenses</div><div class="v warn">${money0(g.exp)}</div><div class="s">all businesses${g.shared>0?' · incl. '+money0(g.shared)+' shared':''}</div></div>
+    <div class="card"><div class="k">Total income</div><div class="v good">${money0(g.income)}</div>
+      <div class="s">Awali rent ${money0(awS.received)} + Iskan rent ${money0(isS.received)} + car wash ${money0(g.washIncome)}</div></div>
+    <div class="card"><div class="k">Total expenses</div><div class="v warn">${money0(g.exp)}</div>
+      <div class="s">Awali ${money0(awE)} + Iskan ${money0(isE)} + car wash ${money0(g.washExp)}${g.shared>0?' + shared '+money0(g.shared):''}</div></div>
     <div class="card"><div class="k">Net profit</div><div class="v ${g.net>=0?'good':'bad'}">${money0(g.net)}</div><div class="s">income − expenses</div></div>`;
   const bp = (prop) => {
     const s = monthStats(mk, prop), exp = propExpenses(mk, prop), net = s.received - exp;
