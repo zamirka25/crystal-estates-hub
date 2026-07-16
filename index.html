@@ -931,6 +931,50 @@ function savePayment(e){
   closeModal('pay-modal'); refreshAll();
   toast('Payment saved — '+u.unitNo+' '+money(amt(p.amount)));
 }
+/* Work out which payments are surplus: for each unit whose recorded payments exceed its rent,
+   find the combination that sums EXACTLY to the rent, keep those, and mark the rest for removal.
+   If no exact combination exists we leave that unit alone for manual review — never guess. */
+function dupFixPlan(mk){
+  const plan = [];
+  units.forEach(u=>{
+    const pays = paymentsFor(u.id, mk);
+    const rent = amt(u.monthlyRent);
+    if (pays.length < 2 || rent <= 0) return;
+    const total = pays.reduce((s,p)=>s+amt(p.amount),0);
+    if (total <= rent + 0.005) return;                 // nothing surplus
+    let best = null;
+    const n = Math.min(pays.length, 12);               // guard against silly combinatorics
+    for (let mask=1; mask<(1<<n); mask++){
+      let s=0; const keep=[];
+      for (let i=0;i<n;i++) if (mask&(1<<i)){ s+=amt(pays[i].amount); keep.push(pays[i]); }
+      if (Math.abs(s-rent) < 0.005 && (!best || keep.length < best.length)) best = keep;
+    }
+    if (!best) return;                                 // can't resolve safely -> manual
+    const keepIds = new Set(best.map(p=>p.id));
+    const remove = pays.filter(p=>!keepIds.has(p.id));
+    if (remove.length) plan.push({ label:u.property+' · '+u.unitNo, rent, recorded:total, remove, extra: total-rent });
+  });
+  return plan;
+}
+async function fixDuplicatePayments(){
+  const mk = months.rep;
+  const plan = dupFixPlan(mk);
+  if (!plan.length){ toast('No duplicate payments that can be removed automatically'); return; }
+  const nRemove = plan.reduce((s,x)=>s+x.remove.length,0);
+  const totalExtra = plan.reduce((s,x)=>s+x.extra,0);
+  const lines = plan.map(x=>'• '+x.label+': recorded '+money(x.recorded)+', rent is '+money(x.rent)+' → remove '+x.remove.length+' payment(s)').join('\n');
+  if (!confirm('Remove '+nRemove+' duplicate payment(s) totalling '+money(totalExtra)+'?\n\n'+lines+'\n\nThe correct rent stays recorded. This applies for the whole team.')) return;
+  let removed=0, failed=0;
+  for (const x of plan){
+    for (const p of x.remove){
+      const { error } = await db.from('ce_rent_payments').delete().eq('id', p.id);
+      if (error){ failed++; continue; }
+      rents = rents.filter(r=>r.id!==p.id); removed++;
+    }
+  }
+  saveLocal(); refreshAll();
+  toast(failed ? ('Removed '+removed+' — '+failed+' failed, try again') : ('✓ Removed '+removed+' duplicate payment(s)'));
+}
 async function deleteRentPayment(id){
   const p = rents.find(x=>x.id===id); if(!p) return;
   const u = units.find(x=>x.id===p.unitId);
@@ -1368,8 +1412,16 @@ function renderReports(){
   const payCount = {};
   monthPays.forEach(p=>{ payCount[p.unitId]=(payCount[p.unitId]||0)+1; });
   const dupUnitIds = Object.keys(payCount).filter(k=>payCount[k]>1);
-  const dupNote = dupUnitIds.length
-    ? `<p class="muted" style="color:var(--red);font-weight:700;">⚠ ${dupUnitIds.length} unit(s) have more than one payment this month — highlighted below. A unit paid twice still shows just “Paid”, but both payments count towards income. Remove the wrong one with ✕.</p>`
+  const overRecorded = all.received - all.collected;
+  const fixable = dupFixPlan(mk);
+  const nFix = fixable.reduce((s,x)=>s+x.remove.length,0);
+  const dupNote = (dupUnitIds.length || overRecorded > 0.005)
+    ? `<div style="background:var(--red-soft);border:1px solid var(--red);border-radius:10px;padding:12px;margin-bottom:12px;">
+        <p style="color:var(--red);font-weight:700;">⚠ ${money(overRecorded)} more rent recorded than was due this month${dupUnitIds.length?` — ${dupUnitIds.length} unit(s) have more than one payment`:''}.</p>
+        <p class="muted" style="margin:6px 0 10px;">A unit paid twice still shows just “Paid” on the Rent tab, but every payment counts towards Total income — that is where the extra income comes from.</p>
+        ${nFix?`<button class="btn btn-danger no-print" onclick="fixDuplicatePayments()">Remove ${nFix} duplicate payment(s) — keep the correct rent</button>`
+              :`<p class="muted">These need removing by hand — use the ✕ next to the wrong payment below.</p>`}
+      </div>`
     : '';
   const payRows = monthPays.map(p=>{
     const u = units.find(x=>x.id===p.unitId);
