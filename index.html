@@ -824,9 +824,12 @@ function renderDashboard(){
   // Show exactly what each total is made of, so every riyal is traceable on screen.
   const awS = monthStats(mk,'Awali'), isS = monthStats(mk,'Iskan');
   const awE = propExpenses(mk,'Awali'), isE = propExpenses(mk,'Iskan');
+  // Any rent not attributable to Awali/Iskan (e.g. a unit with an odd property tag) is surfaced
+  // explicitly, so the breakdown ALWAYS sums to the headline figure — no unexplained remainder.
+  const otherRent = st.received - awS.received - isS.received;
   document.getElementById('dash-group').innerHTML = `
     <div class="card"><div class="k">Total income</div><div class="v good">${money0(g.income)}</div>
-      <div class="s">Awali rent ${money0(awS.received)} + Iskan rent ${money0(isS.received)} + car wash ${money0(g.washIncome)}</div></div>
+      <div class="s">Awali rent ${money0(awS.received)} + Iskan rent ${money0(isS.received)}${otherRent?' + other rent '+money0(otherRent):''} + car wash ${money0(g.washIncome)}</div></div>
     <div class="card"><div class="k">Total expenses</div><div class="v warn">${money0(g.exp)}</div>
       <div class="s">Awali ${money0(awE)} + Iskan ${money0(isE)} + car wash ${money0(g.washExp)}${g.shared>0?' + shared '+money0(g.shared):''}</div></div>
     <div class="card"><div class="k">Net profit</div><div class="v ${g.net>=0?'good':'bad'}">${money0(g.net)}</div><div class="s">income − expenses</div></div>`;
@@ -834,8 +837,9 @@ function renderDashboard(){
     const s = monthStats(mk, prop), exp = propExpenses(mk, prop), net = s.received - exp;
     return `
     <div class="unpaid-item"><span class="muted">${s.occupied} occupied${s.reserved?' · '+s.reserved+' reserved':''} · ${s.vacant} vacant of ${s.total}</span><span></span></div>
-    <div class="unpaid-item"><span>Rent collected</span><b class="t-good">${money(s.received)}</b></div>
-    <div class="unpaid-item"><span class="muted">of ${money(s.expected)} · ${s.paidUnits}/${s.withRent} paid</span><span class="muted">${s.outstanding>0?money(s.outstanding)+' outstanding':'all in 🎉'}</span></div>
+    <div class="unpaid-item"><span>Rent received <span class="muted">(cash in)</span></span><b class="t-good">${money(s.received)}</b></div>
+    <div class="unpaid-item"><span class="muted">${money(s.collected)} of ${money(s.expected)} due · ${s.paidUnits}/${s.withRent} paid</span><span class="muted">${s.outstanding>0?money(s.outstanding)+' outstanding':'all in 🎉'}</span></div>
+    ${s.received>s.collected?`<div class="unpaid-item"><span class="muted" style="color:var(--red);">⚠ ${money(s.received-s.collected)} more received than due — check Reports for a double payment</span><span></span></div>`:''}
     <div class="unpaid-item"><span>Expenses</span><b class="t-warn">− ${money(exp)}</b></div>
     <div class="unpaid-item" style="border-top:2px solid var(--line);"><span><b>Building net</b></span><b class="${net>=0?'t-good':'t-bad'}">${money(net)}</b></div>`;
   };
@@ -914,12 +918,27 @@ function openPayModal(unitId){
 function savePayment(e){
   e.preventDefault();
   const u = units.find(x=>x.id===payingUnitId); if(!u) return;
-  const p = { id:nextId('R',rents,5), unitId:u.id, property:u.property, monthFor:months.rent,
+  // Guard against recording the same rent twice — a duplicate is invisible on the rent board
+  // (the unit just shows "Paid") but BOTH payments would count towards income.
+  const already = paymentsFor(u.id, months.rent);
+  if (already.length && !confirm(u.unitNo+' already has '+already.length+' payment(s) recorded for '+monthLabel(months.rent)
+      +', totalling '+money(paidAmount(u.id, months.rent))+'.\n\nAdd ANOTHER payment on top?\n\nChoose Cancel if this rent is already recorded.')) return;
+  // Unique id (time + random) so two people recording at once can never collide or duplicate.
+  const p = { id:'R'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), unitId:u.id, property:u.property, monthFor:months.rent,
     paidDate:document.getElementById('p-date').value, amount:document.getElementById('p-amount').value,
     method:document.getElementById('p-method').value, notes:document.getElementById('p-notes').value.trim() };
   rents.push(p); dbUpsert('ce_rent_payments',p); saveLocal();
   closeModal('pay-modal'); refreshAll();
   toast('Payment saved — '+u.unitNo+' '+money(amt(p.amount)));
+}
+async function deleteRentPayment(id){
+  const p = rents.find(x=>x.id===id); if(!p) return;
+  const u = units.find(x=>x.id===p.unitId);
+  if (!confirm('Remove this payment of '+money(amt(p.amount))+' for '+((u&&u.unitNo)||p.unitId)+'? This deletes it for the whole team.')) return;
+  const { error } = await db.from('ce_rent_payments').delete().eq('id', id);
+  if (error){ toast('⚠ Could not remove — check internet and try again'); return; }
+  rents = rents.filter(x=>x.id!==id); saveLocal(); refreshAll();
+  toast('Payment removed');
 }
 function undoPayment(unitId){
   const mk = months.rent;
@@ -1344,6 +1363,24 @@ function renderReports(){
   const ws = washStats(mk), ex = expenseTotal(mk);
   const g = groupSheet(mk);
   const awExp = propExpenses(mk,'Awali'), isExp = propExpenses(mk,'Iskan');
+  // Itemise every rent payment behind Total income, and flag any unit paid more than once this month.
+  const monthPays = rents.filter(p=>p.monthFor===mk).sort((a,b)=>String(a.paidDate).localeCompare(String(b.paidDate)));
+  const payCount = {};
+  monthPays.forEach(p=>{ payCount[p.unitId]=(payCount[p.unitId]||0)+1; });
+  const dupUnitIds = Object.keys(payCount).filter(k=>payCount[k]>1);
+  const dupNote = dupUnitIds.length
+    ? `<p class="muted" style="color:var(--red);font-weight:700;">⚠ ${dupUnitIds.length} unit(s) have more than one payment this month — highlighted below. A unit paid twice still shows just “Paid”, but both payments count towards income. Remove the wrong one with ✕.</p>`
+    : '';
+  const payRows = monthPays.map(p=>{
+    const u = units.find(x=>x.id===p.unitId);
+    const dup = payCount[p.unitId]>1;
+    return `<tr${dup?' style="background:var(--red-soft);"':''}>
+      <td>${u?esc(u.property)+' · '+esc(u.unitNo):'<span class="muted">unit deleted ('+esc(p.unitId)+') — not counted in income</span>'}${dup?' <span class="chip overdue">paid twice?</span>':''}</td>
+      <td>${u?esc(u.tenant||''):''}</td>
+      <td>${fmtDate(p.paidDate)}</td>
+      <td class="num"><b>${money(amt(p.amount))}</b></td>
+      <td class="no-print" style="text-align:right;"><button class="btn btn-ghost btn-sm" onclick="deleteRentPayment('${p.id}')" title="Remove this payment">✕</button></td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="empty">No rent payments recorded for this month.</td></tr>';
   const net = all.received + ws.total - ex;
   const rate = all.expected>0 ? Math.round(all.collected/all.expected*100) : 0;
   const nc = v => 'color:'+(v>=0?'var(--green)':'var(--red)')+';';   // net colour
@@ -1385,6 +1422,17 @@ function renderReports(){
         </tbody>
       </table></div>
       <p class="muted" style="margin-top:8px;">Income = rent received + car wash takings. Each business is charged only its own expenses (by the property tag on each expense); “Shared / general” costs are counted at group level.</p>
+    </div>
+    <div class="panel">
+      <h3>Rent received — every payment</h3>
+      ${dupNote}
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Unit</th><th>Tenant</th><th>Paid on</th><th class="num">Amount</th><th class="no-print"></th></tr></thead>
+        <tbody>${payRows}
+          <tr class="ledger-tot"><td colspan="3">Total rent inside Total income</td><td class="num">${money(g.letIncome)}</td><td class="no-print"></td></tr>
+        </tbody>
+      </table></div>
+      <p class="muted" style="margin-top:8px;">Every payment above adds up to the rent part of Total income. If a unit was paid twice by mistake, it is flagged in red — remove the wrong one with ✕ and the totals correct themselves.</p>
     </div>
     <div class="cards">
       <div class="card"><div class="k">Total income</div><div class="v good">${money0(all.received+ws.total)}</div><div class="s">rent + car wash</div></div>
