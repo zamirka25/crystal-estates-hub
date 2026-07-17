@@ -185,6 +185,7 @@ td.num,th.num{text-align:right;}
   </div>
   <p class="muted" style="margin:-4px 0 10px;">Whole group — letting &amp; car wash combined</p>
   <div class="cards" id="dash-group"></div>
+  <div id="dash-dupwarn"></div>
   <div class="split">
     <div class="panel biz-let">
       <h3>🏠 Awali Building</h3>
@@ -833,6 +834,17 @@ function renderDashboard(){
     <div class="card"><div class="k">Total expenses</div><div class="v warn">${money0(g.exp)}</div>
       <div class="s">Awali ${money0(awE)} + Iskan ${money0(isE)} + car wash ${money0(g.washExp)}${g.shared>0?' + shared '+money0(g.shared):''}</div></div>
     <div class="card"><div class="k">Net profit</div><div class="v ${g.net>=0?'good':'bad'}">${money0(g.net)}</div><div class="s">income − expenses</div></div>`;
+  // Duplicate-payment warning with a one-tap fix, right where the wrong number is seen.
+  const extraAll = st.received - st.collected;
+  const fixPlanD = extraAll > 0.005 ? dupFixPlan(mk) : [];
+  const nFixD = fixPlanD.reduce((s,x)=>s+x.remove.length,0);
+  document.getElementById('dash-dupwarn').innerHTML = extraAll > 0.005 ? `
+    <div class="panel" style="background:var(--red-soft);border-color:var(--red);">
+      <p style="color:var(--red);font-weight:700;">⚠ ${money(extraAll)} more rent recorded than was due this month — duplicate payments are inflating Total income.</p>
+      <p class="muted" style="margin:6px 0 10px;">Rent that was really due and collected: <b>${money(st.collected)}</b>. The extra ${money(extraAll)} is double-recorded payments, not real income.</p>
+      ${nFixD?`<button class="btn btn-danger no-print" onclick="fixDuplicatePayments('${mk}')">Fix now — remove ${nFixD} duplicate payment(s), keep the correct rent</button>`
+             :`<p class="muted no-print">Open Reports → “Rent received — every payment” and remove the wrong one(s) with ✕.</p>`}
+    </div>` : '';
   const bp = (prop) => {
     const s = monthStats(mk, prop), exp = propExpenses(mk, prop), net = s.received - exp;
     return `
@@ -956,8 +968,8 @@ function dupFixPlan(mk){
   });
   return plan;
 }
-async function fixDuplicatePayments(){
-  const mk = months.rep;
+async function fixDuplicatePayments(mkArg){
+  const mk = mkArg || months.rep;
   const plan = dupFixPlan(mk);
   if (!plan.length){ toast('No duplicate payments that can be removed automatically'); return; }
   const nRemove = plan.reduce((s,x)=>s+x.remove.length,0);
@@ -1419,7 +1431,7 @@ function renderReports(){
     ? `<div style="background:var(--red-soft);border:1px solid var(--red);border-radius:10px;padding:12px;margin-bottom:12px;">
         <p style="color:var(--red);font-weight:700;">⚠ ${money(overRecorded)} more rent recorded than was due this month${dupUnitIds.length?` — ${dupUnitIds.length} unit(s) have more than one payment`:''}.</p>
         <p class="muted" style="margin:6px 0 10px;">A unit paid twice still shows just “Paid” on the Rent tab, but every payment counts towards Total income — that is where the extra income comes from.</p>
-        ${nFix?`<button class="btn btn-danger no-print" onclick="fixDuplicatePayments()">Remove ${nFix} duplicate payment(s) — keep the correct rent</button>`
+        ${nFix?`<button class="btn btn-danger no-print" onclick="fixDuplicatePayments('${mk}')">Remove ${nFix} duplicate payment(s) — keep the correct rent</button>`
               :`<p class="muted">These need removing by hand — use the ✕ next to the wrong payment below.</p>`}
       </div>`
     : '';
