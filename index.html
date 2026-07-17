@@ -1468,6 +1468,34 @@ function renderReports(){
   }
 
   const unpaid = units.filter(u=>u.status==='Occupied' && amt(u.monthlyRent)>0 && ['due','overdue','partial'].includes(unitRentStatus(u,mk)));
+  // Rent roll: every unit with its entered rent, so the Expected total can be checked line by line.
+  const rentRoll = ['Awali','Iskan'].map(p=>{
+    const list = units.filter(u=>u.property===p).sort((a,b)=>String(a.id).localeCompare(String(b.id),undefined,{numeric:true}));
+    if (!list.length) return '';
+    let running = 0;
+    const rows = list.map(u=>{
+      const rent = amt(u.monthlyRent);
+      const counted = u.status==='Occupied' && rent>0;
+      if (counted) running += rent;
+      const why = u.status!=='Occupied' ? (u.status==='Reserved'?'reserved':'vacant') : (rent<=0?'rent not set':'');
+      return `<tr${counted?'':' style="opacity:.55;"'}>
+        <td>${esc(u.unitNo)}</td>
+        <td>${esc(u.tenant)||'<span class="muted">—</span>'}</td>
+        <td class="num">${rent>0?money(rent):'<span class="muted">not set</span>'}</td>
+        <td class="num">${counted?money(running):'<span class="muted">'+why+' — not counted</span>'}</td></tr>`;
+    }).join('');
+    const stats = monthStats(mk,p);
+    const check = Math.abs(running - stats.expected) < 0.005;
+    return `<h4 style="margin:14px 0 6px;">${p} Building — every unit and its rent</h4>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Unit</th><th>Tenant</th><th class="num">Monthly rent</th><th class="num">Running total</th></tr></thead>
+        <tbody>${rows}
+          <tr class="ledger-tot"><td colspan="2">${p} total rent due</td><td></td><td class="num">${money(running)}</td></tr>
+        </tbody></table></div>
+      <p class="muted" style="margin:6px 0 2px;">${check
+        ? '✓ This adds up exactly to the Expected figure shown on the Rent page ('+money(stats.expected)+').'
+        : '⚠ This does NOT match the Expected figure ('+money(stats.expected)+') — tell Claude.'}</p>`;
+  }).join('');
   document.getElementById('report-content').innerHTML = `
     <div class="panel" style="text-align:center;">
       <h3 style="font-size:18px;">Crystal Estates — Management Report</h3>
@@ -1526,6 +1554,11 @@ function renderReports(){
         <h3 style="margin-top:16px;">Unpaid units (${unpaid.length})</h3>
         ${unpaid.length?`<table><tbody>${unpaid.map(u=>`<tr><td>${esc(u.property)} · ${esc(u.unitNo)}<br><span class="muted">${esc(u.tenant)}</span></td><td class="num">${money(Math.max(0,amt(u.monthlyRent)-paidAmount(u.id,mk)))}</td></tr>`).join('')}</tbody></table>`:'<p class="empty">All paid 🎉</p>'}
       </div>
+    </div>
+    <div class="panel">
+      <h3>Rent roll — check every unit’s rent</h3>
+      <p class="muted">Greyed rows are not counted (vacant, reserved, or rent not set). The running total shows the sum building up unit by unit.</p>
+      ${rentRoll}
     </div>
     <div class="panel">
       <h3>Trend (last 12 months)</h3>
